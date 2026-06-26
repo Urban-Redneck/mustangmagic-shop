@@ -40,7 +40,7 @@ export default function Homepage() {
       <section className="relative h-[85vh] flex items-center justify-center overflow-hidden">
         <div
           className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: "url('https://images.unsplash.com/photo-1552519507-da3b142c6e3d?w=1920&q=80')" }}
+          style={{ backgroundImage: "url('https://images.unsplash.com/photo-1614200187524-dc4b892acf16?w=1920&q=80')" }}
         />
         <div className="absolute inset-0 bg-black/55" />
         <div className="relative z-10 text-center px-4 max-w-4xl">
