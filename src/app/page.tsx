@@ -23,7 +23,8 @@ export default function Homepage() {
         suspension: ['Suspension', 'Suspension & Gears'],
         brakes: ['Brake Upgrades'],
       };
-      return catMap[selectedCategory]?.includes(p.category);
+      const allowed = catMap[selectedCategory] || [];
+      return allowed.some(c => c.toLowerCase() === p.category.toLowerCase());
     });
   }
 
