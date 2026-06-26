@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { stripe } from '@/lib/stripe';
+
+// Lazy-load Stripe only when the key is available
+async function getStripe() {
+  const Stripe = await import('stripe').then(m => m.default || m);
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) throw new Error('STRIPE_SECRET_KEY not configured');
+  return new Stripe(secretKey, { apiVersion: '2025-03-31.base' as any });
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,6 +29,8 @@ export async function POST(request: NextRequest) {
       },
       quantity: item.quantity,
     }));
+
+    const stripe = await getStripe();
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
