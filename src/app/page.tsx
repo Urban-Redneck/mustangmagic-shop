@@ -139,7 +139,7 @@ export default function Homepage() {
             ].map((build, i) => (
               <div key={i} className="bg-zinc-900 rounded-xl overflow-hidden">
                 <img
-                  src={i === 2 ? 'https://mustangmagic.com/wp-content/uploads/2026/06/ShelbyGT500-1.jpg' : `https://images.unsplash.com/photo-${['1583121274602-a3e18b286a3', '1619783181371-1d140db43447'][i]}?w=600&q=75`}
+                  src={i === 2 ? 'https://mustangmagic.com/wp-content/uploads/2026/06/IMG_4373-scaled.jpg' : `https://images.unsplash.com/photo-${['1583121274602-a3e18b286a3', '1619783181371-1d140db43447'][i]}?w=600&q=75`}
                   alt={build.title}
                   className="w-full h-52 object-cover"
                 />
