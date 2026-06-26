@@ -40,7 +40,7 @@ export default function Homepage() {
       <section className="relative h-[85vh] flex items-center justify-center overflow-hidden">
         <div
           className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: "url('https://images.unsplash.com/photo-1614200187524-dc4b892acf16?w=1920&q=80')" }}
+          style={{ backgroundImage: "url('https://mustangmagic.com/wp-content/uploads/2026/06/Mustang2024GT.png')" }}
         />
         <div className="absolute inset-0 bg-black/55" />
         <div className="relative z-10 text-center px-4 max-w-4xl">
@@ -139,7 +139,7 @@ export default function Homepage() {
             ].map((build, i) => (
               <div key={i} className="bg-zinc-900 rounded-xl overflow-hidden">
                 <img
-                  src={`https://images.unsplash.com/photo-${['1583121274602-a3e18b286a3', '1619783181371-1d140db43447', '1552519507-da3b142c6e3d'][i]}?w=600&q=75`}
+                  src={i === 2 ? 'https://mustangmagic.com/wp-content/uploads/2026/06/ShelbyGT500-1.jpg' : `https://images.unsplash.com/photo-${['1583121274602-a3e18b286a3', '1619783181371-1d140db43447'][i]}?w=600&q=75`}
                   alt={build.title}
                   className="w-full h-52 object-cover"
                 />
