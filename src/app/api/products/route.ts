@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchMustangProducts, syncMustangProducts, getAccessTokenFromAPI, getAllBrands, getSingleItem, getItemPricing, getItemInventory } from '@/lib/turn14';
-import { getProductById, getProductBySku, getProducts } from '@/lib/supabase';
+import { getProductById, getProductBySku, getProducts, supabaseUrl, supabaseAnonKey } from '@/lib/supabase';
 
 function transformProduct(p: any) {
   return {
@@ -13,6 +13,45 @@ function transformProduct(p: any) {
     imageUrls: [], inStock: p.active, active: p.active,
     fitments: (p.fitments || []).map((f: any) => ({ year: f.year, generation: f.generation, body_style: f.body_style, engine: f.engine })),
   };
+}
+
+// Direct Supabase REST fetch for debugging
+async function directSupabaseQuery(keyword?: string) {
+  if (!supabaseUrl || !supabaseAnonKey) return [];
+  
+  const params = new URLSearchParams();
+  params.set('select', 'id,sku,name,short_description,long_description,price,map_price,list_price,purchase_cost,active,images,brand_id');
+  params.set('active', 'eq.true');
+  if (keyword) {
+    const searchStr = keyword.replace(/['\\]/g, '');
+    params.set('name', `ilike.%${searchStr}%`);
+  }
+  params.set('order', 'updated_at.desc');
+  params.set('limit', '50');
+  
+  const url = `${supabaseUrl}/rest/v1/products?${params.toString()}`;
+  
+  console.log('[directSupabase] URL:', url.substring(0, 200));
+  
+  const res = await fetch(url, {
+    headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${supabaseAnonKey}` }
+  });
+  
+  if (!res.ok) {
+    const text = await res.text();
+    console.error('[directSupabase] Error:', res.status, text.substring(0, 200));
+    return [];
+  }
+  
+  try {
+    const data = await res.json();
+    console.log('[directSupabase] Count:', data.length);
+    if (data.length > 0) console.log('[directSupabase] First:', data[0].sku, data[0].name.substring(0,60));
+    return data;
+  } catch (e: any) {
+    console.error('[directSupabase] JSON parse error:', e.message);
+    return [];
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -44,16 +83,34 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
 
-    // Search — try Supabase first
-    console.log('[products API] getProducts starting...');
+    // Debug: direct Supabase query first
+    const directData = await directSupabaseQuery(keyword || undefined);
+    console.log('[products API] Direct supabase returned:', directData.length, 'items');
+    
+    if (directData.length > 0) {
+      return NextResponse.json({ products: transformProduct(directData[0]), allProducts: directData.map(transformProduct), total: directData.length });
+    }
+
+    // Try getProducts helper
     const supabaseProducts = await getProducts({
       search: keyword || undefined, brandSlug: brandSlug || undefined, categorySlug: categorySlug || undefined,
       year, generation: generation || undefined, sortBy: 'relevance' as any, limit: 100,
-    }).catch((err) => { console.error('[products API] getProducts error:', err.message); return []; });
+    }).catch((err) => { 
+      console.error('[products API] getProducts error:', err.message); 
+      return []; 
+    });
 
     if (supabaseProducts && supabaseProducts.length > 0) {
       const formatted = supabaseProducts.map(p => transformProduct(p));
       return NextResponse.json({ products: formatted, total: formatted.length, source: 'supabase' });
+    }
+
+    // No results — this is a fallback. If Supabase has data and keyword was empty, show all products
+    if (!keyword && !brandSlug) {
+      const allProducts = await getProducts({ limit: 50 }).catch(() => []);
+      if (allProducts?.length > 0) {
+        return NextResponse.json({ products: allProducts.map(p => transformProduct(p)), total: allProducts.length, source: 'supabase' });
+      }
     }
 
     // Fall back to Turn 14 API
@@ -93,15 +150,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // No results — this is a fallback. If Supabase has data and keyword was empty, show all products
-    if (!keyword && !brandSlug) {
-      const allProducts = await getProducts({ limit: 50 }).catch(() => []);
-      if (allProducts?.length > 0) {
-        return NextResponse.json({ products: allProducts.map(p => transformProduct(p)), total: allProducts.length, source: 'supabase' });
-      }
-    }
-
-    return NextResponse.json({ products: [], total: 0 });
+    // Nothing found anywhere
+    return NextResponse.json({ products: [], total: 0, debug: `keyword=${keyword}, supabaseUrl=${!!supabaseUrl}` });
   } catch (error) {
     console.error('[products API] unhandled error:', error);
     return NextResponse.json({ error: 'Internal server error', debug: String(error) }, { status: 500 });
