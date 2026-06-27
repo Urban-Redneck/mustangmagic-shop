@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Search — try Supabase first
+    console.log('[products API] getProducts starting...');
     const supabaseProducts = await getProducts({
       search: keyword || undefined, brandSlug: brandSlug || undefined, categorySlug: categorySlug || undefined,
       year, generation: generation || undefined, sortBy: 'relevance' as any, limit: 100,
