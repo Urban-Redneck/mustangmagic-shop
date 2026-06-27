@@ -3,7 +3,8 @@
 -- Auto parts categorization, inventory, orders, and fitment
 -- ============================================================
 
--- Enable UUID extension
+-- Enable UUID generation
+create extension if not exists "pgcrypto";
 create extension if not exists "uuid-ossp";
 
 -- -----------------------------------------------------------
@@ -12,7 +13,7 @@ create extension if not exists "uuid-ossp";
 --    e.g. Powertrain → Engine → Cylinder Heads
 -- -----------------------------------------------------------
 create table categories (
-  id          uuid primary key default uuid_generate_v4(),
+  id          uuid primary key default gen_random_uuid(),
   name        text not null,
   slug        text not null unique,
   parent_id   uuid references categories(id) on delete cascade,
@@ -90,7 +91,7 @@ union all select 'Wheels',          'wheels-sub', c.id, 2 from categories c wher
 -- 2. BRANDS / MANUFACTURERS
 -- -----------------------------------------------------------
 create table brands (
-  id          uuid primary key default uuid_generate_v4(),
+  id          uuid primary key default gen_random_uuid(),
   name        text not null unique,
   slug        text not null unique,
   logo_url    text,
@@ -116,7 +117,7 @@ insert into brands (name, slug) values
 --    Source of truth — Turn 14 sync can upsert here
 -- -----------------------------------------------------------
 create table products (
-  id              uuid primary key default uuid_generate_v4(),
+  id              uuid primary key default gen_random_uuid(),
   sku             text not null unique,
   name            text not null,
   short_description text,
@@ -144,19 +145,13 @@ create index idx_products_sku on products(sku);
 create index idx_products_active on products(active) where active = true;
 create index idx_products_price on products(price);
 
--- RLS: public can read, only authenticated (admin) can write
-alter table products enable row level security;
-create policy "Products are publicly readable" on products for select using (true);
-create policy "Only admins can insert" on products for insert with check (auth.uid() = (select admin_id from settings where key = 'master_admin'));
-create policy "Only admins can update" on products for update using (auth.uid() = (select admin_id from settings));
-
 
 -- -----------------------------------------------------------
 -- 4. YMM FITMENT: Year/Make/Vehicle fitment matrix
 --    Associates a product with specific Mustang years/generations
 -- -----------------------------------------------------------
 create table vehicle_generations (
-  id          uuid primary key default uuid_generate_v4(),
+  id          uuid primary key default gen_random_uuid(),
   year        smallint not null,
   make        text not null default 'Ford',
   model       text not null,           -- e.g. 'Mustang'
@@ -168,7 +163,7 @@ create table vehicle_generations (
 );
 
 create table product_fitments (
-  id          uuid primary key default uuid_generate_v4(),
+  id          uuid primary key default gen_random_uuid(),
   product_id  uuid references products(id) on delete cascade,
   vehicle_id  uuid references vehicle_generations(id) on delete cascade,
   notes       text,                    -- "Fits both V6 and GT" etc.
@@ -201,7 +196,7 @@ insert into vehicle_generations (year, model, generation, body_style, engine) va
 -- 5. ORDERS: Full relational order management
 -- -----------------------------------------------------------
 create table orders (
-  id              uuid primary key default uuid_generate_v4(),
+  id              uuid primary key default gen_random_uuid(),
   customer_name   text not null,
   customer_email  text not null,
   customer_phone  text,
@@ -217,7 +212,7 @@ create table orders (
 );
 
 create table order_items (
-  id          uuid primary key default uuid_generate_v4(),
+  id          uuid primary key default gen_random_uuid(),
   order_id    uuid references orders(id) on delete cascade,
   product_id  uuid references products(id),
   sku         text not null,           -- snapshot at time of purchase
@@ -229,7 +224,7 @@ create table order_items (
 );
 
 create table order_addresses (
-  id          uuid primary key default uuid_generate_v4(),
+  id          uuid primary key default gen_random_uuid(),
   order_id    uuid references orders(id) on delete cascade,
   address_type text not null check (address_type in ('shipping', 'billing')),
   first_name  text,
@@ -249,7 +244,7 @@ create table order_addresses (
 --    Persistent cart stored in DB for cross-device support
 -- -----------------------------------------------------------
 create table cart_sessions (
-  id              uuid primary key default uuid_generate_v4(),
+  id              uuid primary key default gen_random_uuid(),
   session_token   text not null unique,
   customer_email  text,                    -- if logged-in / email captured
   status          text default 'active',   -- active | converted | expired
@@ -263,7 +258,7 @@ create index idx_cart_sessions_token on cart_sessions(session_token);
 create index idx_cart_sessions_expires on cart_sessions(expires_at) where status = 'active';
 
 create table cart_items (
-  id              uuid primary key default uuid_generate_v4(),
+  id              uuid primary key default gen_random_uuid(),
   session_id      uuid references cart_sessions(id) on delete cascade,
   product_id      uuid references products(id),
   quantity        int not null default 1 check (quantity > 0),
@@ -279,7 +274,7 @@ create index idx_cart_items_session on cart_items(session_id);
 -- 7. REVIEWS / RATINGS (customer feedback for products)
 -- -----------------------------------------------------------
 create table reviews (
-  id          uuid primary key default uuid_generate_v4(),
+  id          uuid primary key default gen_random_uuid(),
   product_id  uuid references products(id) on delete cascade,
   customer_name text not null,
   customer_email text,            -- for verification only, not displayed
