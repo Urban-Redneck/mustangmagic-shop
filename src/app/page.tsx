@@ -71,7 +71,7 @@ export default function Homepage() {
           keyword = searchQuery;
         }
 
-        // Always fetch from the API — use a default category keyword if none set
+        // Always fetch from the API
         const searchKeyword = keyword || 'headers'; // default to something that will match products
         const res = await fetch(`/api/products?keyword=${encodeURIComponent(searchKeyword)}`);
         const data = await res.json();
