@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchMustangProducts, syncMustangProducts, getAccessTokenFromAPI, getAllBrands, getSingleItem, getItemPricing, getItemInventory } from '@/lib/turn14';
-import { supabaseAdmin, getProductById, getProductBySku, getProducts } from '@/lib/supabase';
+import { getProductById, getProductBySku, getProducts } from '@/lib/supabase';
 
 function transformProduct(p: any) {
   return {
