@@ -1,18 +1,28 @@
 // Supabase client for Mustang Magic shop
 export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 export const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+let adminCache: any = null;
+
+function getAdminClient(): any | null {
+  if (!SUPABASE_URL) return null;
+  if (adminCache) return adminCache;
+  if (!SERVICE_ROLE_KEY) return null;
+  const { createClient } = require('@supabase/supabase-js');
+  adminCache = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+  return adminCache;
+}
 
 function getAuthHeaders(useServiceRole?: boolean) {
-  const key = useServiceRole && serviceRoleKey ? serviceRoleKey : ANON_KEY;
+  const key = useServiceRole && SERVICE_ROLE_KEY ? SERVICE_ROLE_KEY : ANON_KEY;
   if (!key) throw new Error('Supabase API key not configured');
   return { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
 }
 
 function restFetch(path: string, opts?: { method?: string; body?: any; useServiceRole?: boolean }): Promise<{ ok: boolean; data: any }> {
-  const url = new URL(`${SUPABASE_URL}/rest/v1/${path.startsWith('/') ? '' : ''}${encodeURIComponent(path)}`);
-
-  return fetch(url.toString(), {
+  const u = new URL(`${SUPABASE_URL}/rest/v1/${path.startsWith('/') ? '' : ''}${encodeURIComponent(path)}`);
+  return fetch(u.toString(), {
     method: opts?.method || 'GET',
     headers: getAuthHeaders(opts?.useServiceRole),
     body: opts?.body ? JSON.stringify(opts.body) : undefined,
@@ -26,8 +36,6 @@ function restFetch(path: string, opts?: { method?: string; body?: any; useServic
 // Helper to build query params using URLSearchParams (avoids double-encoding issues)
 function appendQuery(url: string, key: string, value: string | number | boolean | (string | number)[]): string {
   const parsed = new URL(url);
-  
-  // Handle special Supabase operators
   if (typeof value === 'boolean') {
     parsed.searchParams.set(key, `eq.${value}`);
   } else if (Array.isArray(value)) {
@@ -36,7 +44,6 @@ function appendQuery(url: string, key: string, value: string | number | boolean 
   } else {
     parsed.searchParams.set(key, `${value}`);
   }
-  
   return parsed.toString();
 }
 
@@ -58,12 +65,12 @@ export async function getProducts(
     search?: string;
   }
 ) {
-  let url = `${SUPABASE_URL}/rest/v1/products`;
+  if (!SUPABASE_URL) return [];
 
+  const parsed = new URL(`${SUPABASE_URL}/rest/v1/products`);
+  
   // Select fields
-  const selectFields = 'id,sku,name,short_description,long_description,price,map_price,list_price,purchase_cost,active,images,turn14_item_id,brand_id,category_id,subcategory_id';
-  const parsed = new URL(url);
-  parsed.searchParams.set('select', selectFields);
+  parsed.searchParams.set('select', 'id,sku,name,short_description,long_description,price,map_price,list_price,purchase_cost,active,images,turn14_item_id,brand_id,category_id,subcategory_id');
 
   // Active filter
   parsed.searchParams.set('active', 'eq.true');
@@ -81,38 +88,84 @@ export async function getProducts(
       categoryIds.push(...(subRes.data as any[]).map((c: any) => c.id));
     }
 
-    url = parsed.toString();
-    const u1 = new URL(url);
+    // Use separate queries for the two conditions since Supabase REST doesn't support OR across columns easily
     const idsStr = categoryIds.map((id: string) => `'${id}'`).join(',');
-    u1.searchParams.set('subcategory_id', `in.(${idsStr})`);
-    url = u1.toString();
+    
+    // Query with subcategory_id first
+    let queryUrl = `${SUPABASE_URL}/rest/v1/products?select=${encodeURIComponent('id,sku,name,short_description,long_description,price,map_price,list_price,purchase_cost,active,images,turn14_item_id,brand_id,category_id,subcategory_id')}&active=eq.true&subcategory_id=in.(${idsStr})`;
 
-    // Also filter by parent category_id
-    const u2 = new URL(url);
-    u2.searchParams.set('category_id', `in.(${idsStr})`);
-    url = u2.toString();
+    // Also need to add category_id filter
+    const q2 = new URL(queryUrl);
+    q2.searchParams.set('category_id', `in.(${idsStr})`);
+    queryUrl = q2.toString();
+    
+    const res = await fetch(queryUrl, { headers: getAuthHeaders() });
+    if (!res.ok) return [];
+    const allProducts = await res.json();
+
+    // Deduplicate (same product may match both subcategory AND category)
+    const seen = new Set<string>();
+    const unique = allProducts.filter((p: any) => { 
+      if (seen.has(p.id)) return false; 
+      seen.add(p.id); 
+      return true; 
+    });
+    
+    // Fetch additional fields for these products
+    const resultUrls = unique.map(async (p: any) => {
+      const idStr = p.id;
+      // Fetch brand names and categories in bulk
+      const allBrandsRes = await restFetch('brands?select=id,name');
+      let brandsMap: Record<string, string> = {};
+      if (allBrandsRes.ok && allBrandsRes.data?.length) {
+        for (const b of allBrandsRes.data as any[]) brandsMap[b.id] = b.name;
+      }
+
+      const allCatsRes = await restFetch('categories?select=id,name');
+      let catMap: Record<string, string> = {};
+      if (allCatsRes.ok && allCatsRes.data?.length) {
+        for (const c of allCatsRes.data as any[]) catMap[c.id] = c.name;
+      }
+
+      // Fetch fitments
+      const productIds = unique.map((pp: any) => pp.id);
+      let fitsMap: Record<string, any[]> = {};
+      if (productIds.length > 0) {
+        const pidStr = productIds.map((id: string) => `'${id}'`).join(',');
+        const fitRes = await restFetch(`product_fitments?select=year,generation,body_style,engine&product_id=in.(${pidStr})`);
+        if (fitRes.ok && fitRes.data?.length) {
+          for (const f of fitRes.data as any[]) {
+            if (!fitsMap[f.product_id]) fitsMap[f.product_id] = [];
+            fitsMap[f.product_id].push({ year: f.year, generation: f.generation, body_style: f.body_style, engine: f.engine });
+          }
+        }
+      }
+
+      return transformProductFromSupabase(p, brandsMap, catMap, fitsMap);
+    });
+    
+    return Promise.all(resultUrls);
   }
 
   // Brand filter
   if (filters?.brandSlug) {
     const brandRes = await restFetch(`brands?slug=eq.${encodeURIComponent(filters.brandSlug)}`);
     if (!brandRes.ok || !brandRes.data?.length) return [];
-    url = appendQuery(url, 'brand_id', (brandRes.data as any[])[0].id);
+    parsed.searchParams.set('brand_id', (brandRes.data as any[])[0].id);
   }
 
   // YMM fitment filter
   if (filters?.year && filters?.generation) {
     const fitRes = await restFetch(`product_fitments?select=product_id&year=eq.${filters.year}&generation=eq.${encodeURIComponent(filters.generation)}`);
     if (!fitRes.ok || !fitRes.data?.length) return [];
-    url = appendQuery(url, 'id', (fitRes.data as any[]).map((f: any) => f.product_id));
+    const idsStr = (fitRes.data as any[]).map((f: any) => `'${f.product_id}'`).join(',');
+    parsed.searchParams.set('id', `in.(${idsStr})`);
   }
 
   // Search - ILIKE via Supabase REST operator
   if (filters?.search) {
-    const u3 = new URL(url);
     const searchStr = filters.search.replace(/['\\]/g, '');
-    u3.searchParams.set('name', `ilike.%${searchStr}%`);
-    url = u3.toString();
+    parsed.searchParams.set('name', `ilike.%${searchStr}%`);
   }
 
   // Sort
@@ -121,18 +174,15 @@ export async function getProducts(
   if (filters?.sortBy === 'price_asc') { sortBy = 'price'; sortDir = 'asc'; }
   else if (filters?.sortBy === 'price_desc') { sortBy = 'price'; sortDir = 'desc'; }
   else if (filters?.sortBy === 'name') { sortBy = 'name'; sortDir = 'asc'; }
-
-  const u4 = new URL(url);
-  u4.searchParams.set('order', `${sortBy}.${sortDir}`);
-  url = u4.toString();
+  parsed.searchParams.set('order', `${sortBy}.${sortDir}`);
 
   // Limit
   const limit = filters?.limit || 50;
-  const finalUrl = new URL(url);
-  finalUrl.searchParams.set('limit', String(limit));
+  parsed.searchParams.set('limit', String(limit));
 
-  const res = await restFetch(finalUrl.pathname + '?' + finalUrl.search.slice(1), { method: 'GET' });
-  if (!res.ok || !res.data?.length) return [];
+  const res = await fetch(parsed.toString(), { headers: getAuthHeaders() });
+  if (!res.ok) return [];
+  const products = await res.json();
 
   // Fetch brand names and categories in bulk
   const allBrandsRes = await restFetch('brands?select=id,name');
@@ -148,7 +198,6 @@ export async function getProducts(
   }
 
   // Fetch all fitments in one query
-  const products = res.data as any[];
   const productIds = products.map((p: any) => p.id);
   let fitsMap: Record<string, any[]> = {};
   if (productIds.length > 0) {
@@ -162,7 +211,11 @@ export async function getProducts(
     }
   }
 
-  return products.map((p: any) => ({
+  return products.map((p: any) => transformProductFromSupabase(p, brandsMap, catMap, fitsMap));
+}
+
+function transformProductFromSupabase(p: any, brandsMap: Record<string, string>, catMap: Record<string, string>, fitsMap: Record<string, any[]>) {
+  return {
     id: p.id, sku: p.sku, name: p.name,
     shortDescription: p.short_description || '', longDescription: p.long_description || '',
     price: p.price ?? 0, mapPrice: p.map_price ?? 0, listPrice: p.list_price ?? 0,
@@ -171,7 +224,7 @@ export async function getProducts(
     imageUrl: (() => { try { const images = JSON.parse(p.images || '[]'); return images.find((i: any) => i.primary)?.url || ''; } catch { return ''; } })(),
     imageUrls: [], active: p.active, inStock: true,
     fitments: fitsMap[p.id] || [],
-  }));
+  };
 }
 
 // -----------------------------------------------------------
@@ -180,7 +233,36 @@ export async function getProducts(
 export async function getProductById(id: string) {
   const res = await restFetch(`products?id=eq.${encodeURIComponent(id)}&limit=1`);
   if (!res.ok || !res.data?.length) return null;
-  return (res.data as any[])[0] || null;
+
+  // Also fetch brand and fitment data
+  const allBrandsRes = await restFetch('brands?select=id,name');
+  let brandsMap: Record<string, string> = {};
+  if (allBrandsRes.ok && allBrandsRes.data?.length) {
+    for (const b of allBrandsRes.data as any[]) brandsMap[b.id] = b.name;
+  }
+
+  const allCatsRes = await restFetch('categories?select=id,name');
+  let catMap: Record<string, string> = {};
+  if (allCatsRes.ok && allCatsRes.data?.length) {
+    for (const c of allCatsRes.data as any[]) catMap[c.id] = c.name;
+  }
+
+  const fitRes = await restFetch(`product_fitments?select=year,generation,body_style,engine&product_id=eq.${encodeURIComponent((res.data as any[])[0].id)}`);
+  let fits: any[] = [];
+  if (fitRes.ok && fitRes.data?.length) {
+    fits = fitRes.data.map((f: any) => ({ year: f.year, generation: f.generation, body_style: f.body_style, engine: f.engine }));
+  }
+
+  const p = (res.data as any[])[0];
+  return {
+    id: p.id, sku: p.sku, name: p.name,
+    shortDescription: p.short_description || '', longDescription: p.long_description || '',
+    price: p.price ?? 0, mapPrice: p.map_price ?? 0, listPrice: p.list_price ?? 0,
+    purchaseCost: p.purchase_cost ?? undefined, brandName: brandsMap[p.brand_id] || 'Unknown',
+    category: catMap[p.category_id] || '', subcategory: catMap[p.subcategory_id] || '',
+    imageUrl: (() => { try { const images = JSON.parse(p.images || '[]'); return images.find((i: any) => i.primary)?.url || ''; } catch { return ''; } })(),
+    imageUrls: [], active: p.active, inStock: true, fitments: fits,
+  };
 }
 
 export async function getProductBySku(sku: string) {
