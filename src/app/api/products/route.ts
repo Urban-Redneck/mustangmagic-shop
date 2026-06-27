@@ -110,7 +110,7 @@ export async function GET(request: NextRequest) {
     if (!keyword && !brandSlug) {
       const allProducts = await getProducts({ limit: 50 }).catch(() => []);
       if (allProducts?.length > 0) {
-        return NextResponse.json({ products: allProducts.map(p => transformProduct(p)), total: allProducts.length, source: 'supabase' });
+        return NextResponse.json({ products: allProducts.map((p: any) => transformProduct(p)), total: allProducts.length, source: 'supabase' });
       }
     }
 
