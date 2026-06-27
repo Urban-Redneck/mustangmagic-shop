@@ -5,7 +5,7 @@ async function getStripe() {
   const Stripe = await import('stripe').then(m => m.default || m);
   const secretKey = process.env.STRIPE_SECRET_KEY;
   if (!secretKey) throw new Error('STRIPE_SECRET_KEY not configured');
-  return new Stripe(secretKey, { apiVersion: '2025-03-31.base' as any });
+  return new Stripe(secretKey);
 }
 
 export async function POST(request: NextRequest) {
