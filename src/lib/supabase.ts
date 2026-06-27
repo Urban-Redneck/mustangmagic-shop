@@ -71,9 +71,9 @@ async function supabaseQuery(table: string, opts?: {
 
   url += '?' + params.toString();
   
-  const headers = opts?.admin 
-    ? { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' }
-    : { 'apikey': supabaseAnonKey, 'Authorization': `Bearer ${supabaseAnonKey}`, 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = opts?.admin
+    ? { apikey: serviceRoleKey!, Authorization: `Bearer ${serviceRoleKey!}`, 'Content-Type': 'application/json' }
+    : { apikey: supabaseAnonKey!, Authorization: `Bearer ${supabaseAnonKey!}`, 'Content-Type': 'application/json' };
 
   const res = await fetch(url, { headers });
   if (!res.ok) {
