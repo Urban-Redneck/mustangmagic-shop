@@ -3,6 +3,30 @@ import { searchMustangProducts, syncMustangProducts, getAccessTokenFromAPI, getA
 import { supabaseAdmin, getProductById, getProductBySku, getProducts } from '@/lib/supabase';
 import { T14_TO_CATEGORY_MAP } from '@/lib/turn14-categories';
 
+// Helper to transform a Supabase product row to frontend format
+function transformProduct(p: any) {
+  return {
+    id: p.id,
+    sku: p.sku,
+    turn14ItemId: p.turn14_item_id || undefined,
+    name: p.name,
+    shortDescription: p.short_description || '',
+    longDescription: p.long_description || '',
+    price: p.price ?? 0,
+    mapPrice: p.map_price ?? 0,
+    listPrice: p.list_price ?? 0,
+    purchaseCost: p.purchase_cost ?? undefined,
+    brandName: p.brand_name || 'Unknown',
+    category: p.category_name || '',
+    subcategory: p.subcategory_name || '',
+    imageUrl: (() => { try { const images = JSON.parse(p.images || '[]'); return images.find((i: any) => i.primary)?.url || ''; } catch { return ''; } })(),
+    imageUrls: [],
+    inStock: p.active,
+    active: p.active,
+    fitments: (p.fitments || []).map((f: any) => ({ year: f.year, generation: f.generation, body_style: f.body_style, engine: f.engine })),
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -76,49 +100,17 @@ export async function GET(request: NextRequest) {
         // Check if it's a UUID (Supabase internal ID)
         if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId)) {
           const product = await getProductById(productId).catch(() => null);
-          if (product) {
+          if (product && (product as any).id) {
             return NextResponse.json({
-              product: {
-                id: product.id,
-                sku: product.sku,
-                name: product.name,
-                shortDescription: product.short_description,
-                longDescription: product.long_description,
-                price: product.price,
-                mapPrice: product.map_price ?? 0,
-                listPrice: product.list_price ?? 0,
-                brandName: product.brand?.name || 'Unknown',
-                category: product.category?.name || '',
-                subcategory: product.subcategory?.name || '',
-                imageUrl: (product.images as any[])?.find((img: any) => img.primary)?.url || '',
-                imageUrls: (product.images as any[])?.filter((img: any) => !img.primary).map((img: any) => img.url) || [],
-                active: product.active,
-                fitments: (product.fitments as any[])?.map((f: any) => ({ year: f.year, generation: f.generation, body_style: f.body_style, engine: f.engine })) || [],
-              },
+              product: transformProduct(product),
             });
           }
         } else {
           // Try SKU lookup
           const product = await getProductBySku(productId).catch(() => null);
-          if (product) {
+          if (product && (product as any).id) {
             return NextResponse.json({
-              product: {
-                id: product.id,
-                sku: product.sku,
-                name: product.name,
-                shortDescription: product.short_description,
-                longDescription: product.long_description,
-                price: product.price,
-                mapPrice: product.map_price ?? 0,
-                listPrice: product.list_price ?? 0,
-                brandName: product.brand?.name || 'Unknown',
-                category: product.category?.name || '',
-                subcategory: product.subcategory?.name || '',
-                imageUrl: (product.images as any[])?.find((img: any) => img.primary)?.url || '',
-                imageUrls: (product.images as any[])?.filter((img: any) => !img.primary).map((img: any) => img.url) || [],
-                active: product.active,
-                fitments: (product.fitments as any[])?.map((f: any) => ({ year: f.year, generation: f.generation, body_style: f.body_style, engine: f.engine })) || [],
-              },
+              product: transformProduct(product),
             });
           }
         }

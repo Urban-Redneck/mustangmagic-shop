@@ -71,34 +71,29 @@ export default function Homepage() {
           keyword = searchQuery;
         }
 
-        if (keyword) {
-          const res = await fetch(`/api/products?keyword=${encodeURIComponent(keyword)}`);
-          const data = await res.json();
-          // Only use API results if they actually returned products AND the item has pricing
-          const validProducts = (data.products || []).filter((p: any) => p.purchaseCost > 0 || (p.priceLists && p.priceLists.length > 0));
-          if (validProducts.length > 0) {
-            setProducts(validProducts.slice(0, 20).map((p: any) => ({
-              id: p.id,
-              sku: p.sku,
-              name: p.name,
-              shortDescription: p.shortDescription,
-              price: p.price || 0,
-              mapPrice: p.mapPrice || 0,
-              listPrice: p.listPrice || 0,
-              brandName: p.brandName,
-              category: p.category,
-              imageUrl: p.imageUrl || '',
-              imageUrls: [],
-              inStock: true,
-              totalInventory: p.totalInventory,
-            })));
-          } else {
-            // Fall back to mock products
-            setProducts(DEFAULT_PRODUCTS);
-          }
+        // Always fetch from the API — use a default category keyword if none set
+        const searchKeyword = keyword || 'headers'; // default to something that will match products
+        const res = await fetch(`/api/products?keyword=${encodeURIComponent(searchKeyword)}`);
+        const data = await res.json();
+        
+        if (data.products && data.products.length > 0) {
+          setProducts(data.products.slice(0, 15).map((p: any) => ({
+            id: p.id,
+            sku: p.sku,
+            name: p.name,
+            shortDescription: p.shortDescription || p.short_description || '',
+            price: p.price || 0,
+            mapPrice: p.mapPrice || p.map_price || 0,
+            listPrice: p.listPrice || p.list_price || 0,
+            brandName: p.brandName || p.brand_name || '',
+            category: p.category || '',
+            imageUrl: p.imageUrl || (typeof p.images === 'string' ? (() => { try { const imgs = JSON.parse(p.images); return imgs.find((i: any) => i.primary)?.url; } catch { return ''; } })() : ''),
+            imageUrls: [],
+            inStock: true,
+          })));
         } else {
-          // Default: show mock products (all are verified Ford Mustang compatible)
-          setProducts(DEFAULT_PRODUCTS);
+          // Fall back to mock products with real placeholder images
+          setProducts(DEFAULT_PRODUCTS.map(p => ({ ...p }))); // keep as-is, they have fallback handling now
         }
       } catch (e) {
         console.error('Failed to fetch products:', e);

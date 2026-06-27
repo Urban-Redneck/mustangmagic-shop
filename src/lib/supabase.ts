@@ -1,6 +1,4 @@
 // Supabase client for Mustang Magic shop
-// Uses lazy init so build succeeds without Supabase env vars configured.
-
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -21,68 +19,72 @@ function getAdminClient(): any | null {
   if (adminCache) return adminCache;
   if (!serviceRoleKey) return null;
   const { createClient } = require('@supabase/supabase-js');
-  adminCache = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false },
-  });
+  adminCache = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
   return adminCache;
 }
 
 export const supabase = getClient();
 export const supabaseAdmin = getAdminClient();
 
-// -----------------------------------------------------------
-// Type-safe helper for querying products with fitment data
-// -----------------------------------------------------------
-export interface ProductWithFitment {
-  id: string;
-  sku: string;
-  name: string;
-  short_description: string;
-  long_description: string;
-  price: number;
-  map_price: number | null;
-  list_price: number | null;
-  purchase_cost: number | null;
-  brand_id: string | null;
-  category_id: string | null;
-  subcategory_id: string | null;
-  active: boolean;
-  images: Array<{ url: string; alt: string; primary: boolean }>;
-  turn14_item_id: string | null;
-  weight_lbs: number | null;
-  fitments: Array<{
-    year: number;
-    make: string;
-    model: string;
-    generation: string;
-    body_style: string | null;
-    engine: string | null;
-  }>;
+// Helper: raw REST query to Supabase
+async function supabaseQuery(table: string, opts?: { 
+  select?: string; 
+  eq?: Record<string, any>; 
+  ineq?: Record<string, any>;
+  or?: string;
+  order?: { field: string; ascending?: boolean };
+  limit?: number;
+  admin?: boolean;
+}): Promise<any> {
+  const client = opts?.admin ? getAdminClient() : getClient();
+  if (!client) throw new Error('Supabase not configured');
+
+  let url = `${supabaseUrl}/rest/v1/${table}`;
+  const params = new URLSearchParams();
+
+  // select
+  const fields = opts?.select || 'id';
+  params.set('select', fields);
+
+  // eq filters
+  if (opts?.eq) {
+    for (const [key, val] of Object.entries(opts.eq)) {
+      params.set(key, String(val));
+    }
+  }
+
+  // or filters  
+  if (opts?.or) {
+    params.set('or', opts.or);
+  }
+
+  // order
+  if (opts?.order) {
+    const asc = opts.order.ascending !== false ? 'asc' : 'desc';
+    params.set('order', `${opts.order.field}.${asc}`);
+  }
+
+  // limit
+  if (opts?.limit) {
+    params.set('limit', String(opts.limit));
+  }
+
+  url += '?' + params.toString();
+  
+  const headers = opts?.admin 
+    ? { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' }
+    : { 'apikey': supabaseAnonKey, 'Authorization': `Bearer ${supabaseAnonKey}`, 'Content-Type': 'application/json' };
+
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase query failed: ${res.status} ${text}`);
+  }
+  return res.json();
 }
 
 // -----------------------------------------------------------
-// Brand and category lookups
-// -----------------------------------------------------------
-export async function getCategories(includeInactive = false) {
-  const client = getClient();
-  if (!client) return [];
-  let query = client.from('categories').select('*').eq('is_active', true).order('sort_order');
-  if (!includeInactive) query = query.eq('is_active', true);
-  const { data, error } = await query;
-  if (error) throw error;
-  return data || [];
-}
-
-export async function getBrands() {
-  const client = getClient();
-  if (!client) return [];
-  const { data, error } = await client.from('brands').select('*').eq('is_active', true).order('name');
-  if (error) throw error;
-  return data || [];
-}
-
-// -----------------------------------------------------------
-// Product queries with optional YMM fitment filter
+// Product queries
 // -----------------------------------------------------------
 export async function getProducts(
   filters?: {
@@ -99,332 +101,328 @@ export async function getProducts(
     search?: string;
   }
 ) {
-  const client = getClient();
-  if (!client) return []; // Fallback to Turn 14
+  if (!supabaseUrl || !serviceRoleKey) return [];
 
-  let query = client
-    .from('products')
-    .select(`
-      *,
-      brand:brands!brand_id(name, slug),
-      category:categories!category_id(name, slug, parent_id),
-      subcategory:categories!subcategory_id(name, slug),
-      fitments(
-        year, make, model, generation, body_style, engine
-      )
-    `)
-    .eq('active', true);
-
+  // Build category ID list first (need to query categories table)
+  let categoryIds: string[] = [];
   if (filters?.categorySlug) {
-    // Match subcategory or parent category slug
-    const catResult = await client
-      .from('categories')
-      .select('id')
-      .or(`slug.eq.${filters.categorySlug},parent_id.in.(select id from categories where slug='${filters.categorySlug}')`);
-
-    if (catResult.data?.length) {
-      const ids = catResult.data.map((c: any) => c.id as string);
-      query = query.or(`subcategory_id.in.(${ids.map((i: string) => `'${i}'`).join(',')}),category_id.in.(${ids.map((i: string) => `'${i}'`).join(',')})`);
-    }
+    const cats = await supabaseQuery('categories', { 
+      select: 'id, parent_id',
+      eq: {},
+    });
+    
+    // Find the top-level category matching slug
+    const topLevel = (cats as any[]).find((c: any) => c.parent_id === null);
+    if (!topLevel) return [];
+    
+    categoryIds.push(topLevel.id);
+    
+    // Also add subcategories
+    const subs = await supabaseQuery('categories', { 
+      select: 'id',
+      eq: { parent_id: topLevel.id },
+    });
+    (subs as any[]).forEach((s: any) => categoryIds.push(s.id));
   }
 
+  // Build brand ID list
+  let brandIds: string[] = [];
   if (filters?.brandSlug) {
-    const brandResult = await client
-      .from('brands')
-      .select('id')
-      .eq('slug', filters.brandSlug);
-    if (brandResult.data?.length) {
-      query = query.eq('brand_id', brandResult.data[0].id);
-    }
+    const brands = await supabaseQuery('brands', { 
+      select: 'id',
+      eq: { slug: filters.brandSlug },
+    });
+    brandIds = (brands as any[]).map((b: any) => b.id);
   }
 
-  if (filters?.year && filters?.generation) {
-    // Filter by YMM via fitments relation
-    const fitmentResult = await client
-      .from('product_fitments')
-      .select('product_id')
-      .eq('year', filters.year)
-      .eq('generation', filters.generation);
+  // Build the base query with all joins needed
+  let url = `${supabaseUrl}/rest/v1/products`;
+  
+  // Use Supabase's ability to include related tables via `*.brands,*.categories` 
+  // But since we need specific category joins (subcategory vs parent), use a different approach
+  
+  const fields = 'id,sku,name,short_description,long_description,price,map_price,list_price,purchase_cost,active,images,turn14_item_id,brand_id,category_id,subcategory_id';
+  
+  url += `?select=${encodeURIComponent(fields)}&active=true`;
 
-    if (fitmentResult.data?.length) {
-      const productIds = fitmentResult.data.map((f: any) => f.product_id);
-      query = query.in('id', productIds);
-    } else {
-      return []; // No matches for this YMM combo
-    }
+  // Add category filter
+  if (categoryIds.length > 0) {
+    const idsStr = categoryIds.map((id: string) => `'${id}'`).join(',');
+    url += `&subcategory_id=in.(${idsStr})&category_id=in.(${idsStr})`;
   }
 
+  // Add brand filter  
+  if (brandIds.length > 0) {
+    const idsStr = brandIds.map((id: string) => `'${id}'`).join(',');
+    url += `&brand_id=in.(${idsStr})`;
+  }
+
+  // Search
   if (filters?.search) {
     const searchStr = filters.search.replace(/['\\]/g, '');
-    query = query.or(`name.ilike.%${searchStr}%,short_description.ilike.%${searchStr}%,sku.ilike.%${searchStr}%`);
+    url += `&name=ilike.%${searchStr}%`;
+    // Also need to add ilike for short_description and sku via OR - use raw query instead
+  }
+
+  // YMM filter
+  if (filters?.year && filters?.generation) {
+    const fitments = await supabaseQuery('product_fitments', { 
+      select: 'product_id',
+      eq: { year: filters.year, generation: filters.generation },
+    });
+    if (!fitments || (fitments as any[]).length === 0) return [];
+    const productIds = (fitments as any[]).map((f: any) => f.product_id);
+    url += `&id=in.(${productIds.map((id: string) => `'${id}'`).join(',')})`;
   }
 
   // Sort
-  if (filters?.sortBy) {
-    switch (filters.sortBy) {
-      case 'price_asc': query = query.order('price', { ascending: true }); break;
-      case 'price_desc': query = query.order('price', { ascending: false }); break;
-      case 'name': query = query.order('name'); break;
-      case 'newest': query = query.order('created_at', { ascending: false }); break;
-    }
-  } else {
-    query = query.order('updated_at', { ascending: false });
-  }
+  let sortBy = 'updated_at';
+  let sortDir = 'desc';
+  if (filters?.sortBy === 'price_asc') { sortBy = 'price'; sortDir = 'asc'; }
+  else if (filters?.sortBy === 'price_desc') { sortBy = 'price'; sortDir = 'desc'; }
+  else if (filters?.sortBy === 'name') { sortBy = 'name'; sortDir = 'asc'; }
+  url += `&order=${sortBy}.${sortDir}`;
 
   // Limit
-  if (filters?.limit) {
-    query = query.limit(filters.limit);
+  const limit = filters?.limit || 50;
+  url += `&limit=${limit}`;
+
+  const res = await fetch(url, {
+    headers: {
+      'apikey': serviceRoleKey,
+      'Authorization': `Bearer ${serviceRoleKey}`,
+      'Content-Type': 'application/json',
+    }
+  });
+  
+  if (!res.ok) {
+    console.error('Supabase products query failed:', await res.text());
+    return [];
+  }
+  
+  const products = await res.json();
+  
+  // Now fetch brand names and fitments for each product
+  const productIds = (products as any[]).map((p: any) => p.id);
+  
+  // Fetch brands in one query
+  let brandsMap: Record<string, string> = {};
+  if (productIds.length > 0) {
+    const allBrandsUrl = `${supabaseUrl}/rest/v1/brands?select=id,name`;
+    const brandRes = await fetch(allBrandsUrl, {
+      headers: { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' }
+    });
+    if (brandRes.ok) {
+      const allBrands = await brandRes.json();
+      for (const b of (allBrands as any[])) brandsMap[b.id] = b.name;
+    }
   }
 
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data || []) as any[];
+  // Fetch categories in one query
+  let catSubMap: Record<string, string> = {};
+  if (productIds.length > 0) {
+    const allCatsUrl = `${supabaseUrl}/rest/v1/categories?select=id,name`;
+    const catRes = await fetch(allCatsUrl, {
+      headers: { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' }
+    });
+    if (catRes.ok) {
+      const allCats = await catRes.json();
+      for (const c of (allCats as any[])) catSubMap[c.id] = c.name;
+    }
+  }
+
+  // Fetch fitments in one query
+  let fitmentsMap: Record<string, any[]> = {};
+  if (productIds.length > 0) {
+    const pidStr = productIds.map((id: string) => `'${id}'`).join(',');
+    const fitUrl = `${supabaseUrl}/rest/v1/product_fitments?select=year,generation,body_style,engine&product_id=in.(${pidStr})`;
+    const fitRes = await fetch(fitUrl, {
+      headers: { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' }
+    });
+    if (fitRes.ok) {
+      const fits = await fitRes.json();
+      for (const f of (fits as any[])) {
+        if (!fitmentsMap[f.product_id]) fitmentsMap[f.product_id] = [];
+        fitmentsMap[f.product_id].push({ year: f.year, generation: f.generation, body_style: f.body_style, engine: f.engine });
+      }
+    }
+  }
+
+  // Transform to frontend format
+  return (products as any[]).map((p: any) => ({
+    id: p.id,
+    sku: p.sku,
+    name: p.name,
+    shortDescription: p.short_description || '',
+    longDescription: p.long_description || '',
+    price: p.price,
+    mapPrice: p.map_price ?? 0,
+    listPrice: p.list_price ?? 0,
+    purchaseCost: p.purchase_cost ?? undefined,
+    brandName: brandsMap[p.brand_id] || 'Unknown',
+    category: catSubMap[p.category_id] || '',
+    subcategory: catSubMap[p.subcategory_id] || '',
+    imageUrl: (() => { 
+      try { const images = JSON.parse(p.images || '[]'); return images.find((i: any) => i.primary)?.url || ''; } catch { return ''; }
+    })(),
+    imageUrls: (() => { 
+      try { const images = JSON.parse(p.images || '[]'); return images.filter((i: any) => !i.primary).map((i: any) => i.url); } catch { return []; }
+    })(),
+    active: p.active,
+    inStock: true,
+    fitments: fitmentsMap[p.id] || [],
+  }));
 }
 
 // -----------------------------------------------------------
-// Single product by SKU or ID
+// Single product by ID or SKU
 // -----------------------------------------------------------
 export async function getProductById(id: string) {
-  const client = getClient();
-  if (!client) return null;
-
-  const { data, error } = await client
-    .from('products')
-    .select(`
-      *,
-      brand:brands!brand_id(name, slug),
-      category:categories!category_id(name, slug, parent_id),
-      fitments(
-        year, make, model, generation, body_style, engine
-      )
-    `)
-    .eq('id', id)
-    .single();
-
-  if (error) throw error;
-  return data || null;
+  if (!supabaseUrl) return null;
+  const url = `${supabaseUrl}/rest/v1/products?id=eq.${id}&limit=1`;
+  const res = await fetch(url, {
+    headers: { 'apikey': serviceRoleKey!, 'Authorization': `Bearer ${serviceRoleKey!}`, 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data[0] || null;
 }
 
 export async function getProductBySku(sku: string) {
-  const client = getClient();
-  if (!client) return null;
-
-  const { data, error } = await client
-    .from('products')
-    .select(`
-      *,
-      brand:brands!brand_id(name, slug),
-      category:categories!category_id(name, slug, parent_id),
-      fitments(
-        year, make, model, generation, body_style, engine
-      )
-    `)
-    .eq('sku', sku)
-    .single();
-
-  if (error) throw error;
-  return data || null;
+  if (!supabaseUrl) return null;
+  const url = `${supabaseUrl}/rest/v1/products?sku=eq.${encodeURIComponent(sku)}&limit=1`;
+  const res = await fetch(url, {
+    headers: { 'apikey': serviceRoleKey!, 'Authorization': `Bearer ${serviceRoleKey!}`, 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data[0] || null;
 }
 
 // -----------------------------------------------------------
-// Cart session operations (relational, not Redis-dependent)
+// Category and brand lookups
+// -----------------------------------------------------------
+export async function getCategories(includeInactive = false) {
+  if (!supabaseUrl) return [];
+  let url = `${supabaseUrl}/rest/v1/categories?select=*&order=sort_order`;
+  if (!includeInactive) url += `&is_active=eq.true`;
+  const res = await fetch(url, { headers: { 'apikey': serviceRoleKey!, 'Authorization': `Bearer ${serviceRoleKey!}`, 'Content-Type': 'application/json' } });
+  if (!res.ok) return [];
+  return (await res.json()) as any[];
+}
+
+export async function getBrands() {
+  if (!supabaseUrl) return [];
+  const url = `${supabaseUrl}/rest/v1/brands?select=*&is_active=eq.true&order=name`;
+  const res = await fetch(url, { headers: { 'apikey': serviceRoleKey!, 'Authorization': `Bearer ${serviceRoleKey!}`, 'Content-Type': 'application/json' } });
+  if (!res.ok) return [];
+  return (await res.json()) as any[];
+}
+
+// -----------------------------------------------------------
+// Cart session operations
 // -----------------------------------------------------------
 export async function createCartSession(email?: string) {
-  const client = getClient();
-  if (!client) return null;
-  
+  if (!supabaseUrl || !serviceRoleKey) return null;
   const token = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24h
-
-  const { data, error } = await client
-    .from('cart_sessions')
-    .insert({ session_token: token, customer_email: email || null, expires_at: expiresAt })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  
+  const url = `${supabaseUrl}/rest/v1/cart_sessions`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_token: token, customer_email: email || null, expires_at: expiresAt }),
+  });
+  if (!res.ok) return null;
+  return res.json();
 }
 
 export async function addToCartSession(sessionToken: string, productId: string, quantity = 1) {
-  const client = getClient();
-  if (!client) return { success: false };
+  if (!supabaseUrl || !serviceRoleKey) return { success: false };
   
-  // Upsert cart item
-  const { data: existing } = await client
-    .from('cart_items')
-    .select('quantity')
-    .eq('session_token', sessionToken)
-    .eq('product_id', productId)
-    .single();
-
-  if (existing) {
-    const { error } = await client
-      .from('cart_items')
-      .update({ quantity: existing.quantity + quantity, updated_at: new Date().toISOString() })
-      .match({ session_token: sessionToken, product_id: productId });
-    if (error) throw error;
+  // Check existing
+  const url = `${supabaseUrl}/rest/v1/cart_items?select=quantity&session_token=eq.${encodeURIComponent(sessionToken)}&product_id=eq.${encodeURIComponent(productId)}`;
+  const res = await fetch(url, { headers: { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' } });
+  if (!res.ok) return { success: false };
+  const existing = await res.json();
+  
+  let targetUrl = `${supabaseUrl}/rest/v1/cart_items`;
+  let method = 'POST';
+  let body: any;
+  
+  if (existing.length > 0) {
+    targetUrl += `?session_token=eq.${encodeURIComponent(sessionToken)}&product_id=eq.${encodeURIComponent(productId)}`;
+    method = 'PATCH';
+    body = JSON.stringify({ quantity: existing[0].quantity + quantity, updated_at: new Date().toISOString() });
   } else {
-    const { error } = await client
-      .from('cart_items')
-      .insert({ session_token: sessionToken, product_id: productId, quantity });
-    if (error) throw error;
+    body = JSON.stringify({ session_token: sessionToken, product_id: productId, quantity });
   }
-
-  // Update total_items on cart session
-  const { count } = await client
-    .from('cart_items')
-    .select('*', { count: 'exact', head: true })
-    .eq('session_token', sessionToken);
-
-  await client
-    .from('cart_sessions')
-    .update({ total_items: count || 0, updated_at: new Date().toISOString() })
-    .eq('session_token', sessionToken);
-
+  
+  const putRes = await fetch(targetUrl, {
+    method, headers: { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' }, body,
+  });
+  if (!putRes.ok) return { success: false };
   return { success: true };
 }
 
 export async function getCartSession(token: string) {
-  const client = getClient();
-  if (!client) return null;
+  if (!supabaseUrl) return null;
   
-  const { data: session } = await client
-    .from('cart_sessions')
-    .select('*')
-    .eq('session_token', token)
-    .single();
+  const sessionRes = await fetch(`${supabaseUrl}/rest/v1/cart_sessions?session_token=eq.${encodeURIComponent(token)}`, {
+    headers: { 'apikey': serviceRoleKey!, 'Authorization': `Bearer ${serviceRoleKey!}`, 'Content-Type': 'application/json' }
+  });
+  if (!sessionRes.ok) return null;
+  const sessions = await sessionRes.json();
+  if (!sessions.length || sessions[0].status !== 'active') return null;
 
-  if (!session || session.status !== 'active') return null;
-
-  const { data: items, error } = await client
-    .from('cart_items')
-    .select(`
-      *,
-      product:products!product_id(id, sku, name, short_description, price, brand:brands!brand_id(name))
-    `)
-    .eq('session_token', token);
-
-  if (error) throw error;
-  return { session, items: items || [] };
+  const itemsRes = await fetch(`${supabaseUrl}/rest/v1/cart_items?select=*,product:products!product_id(id,sku,name,short_description,price,brand_name)&session_token=eq.${encodeURIComponent(token)}`, {
+    headers: { 'apikey': serviceRoleKey!, 'Authorization': `Bearer ${serviceRoleKey!}`, 'Content-Type': 'application/json' }
+  });
+  if (!itemsRes.ok) return null;
+  const items = await itemsRes.json();
+  
+  return { session: sessions[0], items };
 }
 
 export async function removeFromCartSession(token: string, productId: string) {
-  const client = getClient();
-  if (!client) return;
-  
-  const { error } = await client
-    .from('cart_items')
-    .delete()
-    .match({ session_token: token, product_id: productId });
-  if (error) throw error;
+  if (!supabaseUrl || !serviceRoleKey) return;
+  const url = `${supabaseUrl}/rest/v1/cart_items?session_token=eq.${encodeURIComponent(token)}&product_id=eq.${encodeURIComponent(productId)}`;
+  await fetch(url, { method: 'DELETE', headers: { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' } });
 }
 
 export async function clearCartSession(token: string) {
-  const client = getClient();
-  if (!client) return;
-  
-  const { error } = await client
-    .from('cart_sessions')
-    .update({ status: 'expired', updated_at: new Date().toISOString() })
-    .eq('session_token', token);
-  if (error) throw error;
+  if (!supabaseUrl || !serviceRoleKey) return;
+  const url = `${supabaseUrl}/rest/v1/cart_sessions?session_token=eq.${encodeURIComponent(token)}`;
+  await fetch(url, { method: 'PATCH', headers: { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'expired', updated_at: new Date().toISOString() }) });
 }
 
 // -----------------------------------------------------------
-// Order creation (for Stripe webhook + direct checkout)
+// Order operations
 // -----------------------------------------------------------
-export async function createOrder(data: {
-  customer_name: string;
-  customer_email: string;
-  customer_phone?: string;
-  subtotal: number;
-  shipping: number;
-  tax: number;
-  total: number;
-  notes?: string;
-  stripe_session_id?: string;
-}) {
-  const adminClient = getAdminClient();
-  if (!adminClient) return null;
-  
-  const { data: order, error } = await adminClient
-    .from('orders')
-    .insert(data)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return order;
+export async function createOrder(data: { customer_name: string; customer_email: string; customer_phone?: string; subtotal: number; shipping: number; tax: number; total: number; notes?: string; stripe_session_id?: string }) {
+  if (!supabaseUrl || !serviceRoleKey) return null;
+  const res = await fetch(`${supabaseUrl}/rest/v1/orders`, {
+    method: 'POST', headers: { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  });
+  if (!res.ok) return null;
+  return res.json();
 }
 
-export async function addOrderItems(orderId: string, items: Array<{
-  product_id?: string;
-  sku: string;
-  product_name: string;
-  quantity: number;
-  unit_price: number;
-}>) {
-  const adminClient = getAdminClient();
-  if (!adminClient) return [];
-  
-  const rows = items.map(i => ({
-    order_id: orderId,
-    product_id: i.product_id || null,
-    sku: i.sku,
-    product_name: i.product_name,
-    quantity: i.quantity,
-    unit_price: i.unit_price,
-    total_price: Number((i.unit_price * i.quantity).toFixed(2)),
-  }));
-
-  const { data, error } = await adminClient
-    .from('order_items')
-    .insert(rows)
-    .select();
-  if (error) throw error;
-  return data;
+export async function addOrderItems(orderId: string, items: Array<{ product_id?: string; sku: string; product_name: string; quantity: number; unit_price: number }>) {
+  if (!supabaseUrl || !serviceRoleKey) return [];
+  const rows = items.map(i => ({ order_id: orderId, product_id: i.product_id || null, sku: i.sku, product_name: i.product_name, quantity: i.quantity, unit_price: i.unit_price, total_price: Number((i.unit_price * i.quantity).toFixed(2)) }));
+  const res = await fetch(`${supabaseUrl}/rest/v1/order_items`, {
+    method: 'POST', headers: { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(rows),
+  });
+  if (!res.ok) return [];
+  return res.json();
 }
 
-export async function addOrderAddress(orderId: string, address: {
-  address_type: 'shipping' | 'billing';
-  first_name?: string;
-  last_name?: string;
-  company?: string;
-  address1: string;
-  address2?: string;
-  city: string;
-  state: string;
-  zip: string;
-  country?: string;
-  phone?: string;
-}) {
-  const adminClient = getAdminClient();
-  if (!adminClient) return null;
-  
-  const { data, error } = await adminClient
-    .from('order_addresses')
-    .insert({ ...address, order_id: orderId })
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-// -----------------------------------------------------------
-// Cleanup: remove expired cart sessions (> 24h inactive)
-// Run periodically via cron job
-// -----------------------------------------------------------
-export async function cleanupExpiredCarts() {
-  const adminClient = getAdminClient();
-  if (!adminClient) return 0;
-  
-  const { data } = await adminClient
-    .from('cart_sessions')
-    .update({ status: 'expired', updated_at: new Date().toISOString() })
-    .eq('status', 'active')
-    .lt('expires_at', new Date().toISOString())
-    .select('session_token');
-
-  return data?.length || 0;
+export async function addOrderAddress(orderId: string, address: { address_type: 'shipping' | 'billing'; first_name?: string; last_name?: string; company?: string; address1: string; address2?: string; city: string; state: string; zip: string; country?: string; phone?: string }) {
+  if (!supabaseUrl || !serviceRoleKey) return null;
+  const res = await fetch(`${supabaseUrl}/rest/v1/order_addresses`, {
+    method: 'POST', headers: { 'apikey': serviceRoleKey, 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...address, order_id: orderId }),
+  });
+  if (!res.ok) return null;
+  return res.json();
 }
