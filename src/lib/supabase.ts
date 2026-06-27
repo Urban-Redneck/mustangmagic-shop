@@ -1,16 +1,16 @@
 // Supabase client for Mustang Magic shop
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+export const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 function getAuthHeaders(useServiceRole?: boolean) {
-  const key = useServiceRole && serviceRoleKey ? serviceRoleKey : supabaseAnonKey;
+  const key = useServiceRole && serviceRoleKey ? serviceRoleKey : ANON_KEY;
   if (!key) throw new Error('Supabase API key not configured');
   return { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
 }
 
 function restFetch(path: string, opts?: { method?: string; body?: any; useServiceRole?: boolean }): Promise<{ ok: boolean; data: any }> {
-  const url = new URL(`${supabaseUrl}/rest/v1/${path.startsWith('/') ? '' : ''}${encodeURIComponent(path)}`);
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${path.startsWith('/') ? '' : ''}${encodeURIComponent(path)}`);
 
   return fetch(url.toString(), {
     method: opts?.method || 'GET',
@@ -58,7 +58,7 @@ export async function getProducts(
     search?: string;
   }
 ) {
-  let url = `${supabaseUrl}/rest/v1/products`;
+  let url = `${SUPABASE_URL}/rest/v1/products`;
 
   // Select fields
   const selectFields = 'id,sku,name,short_description,long_description,price,map_price,list_price,purchase_cost,active,images,turn14_item_id,brand_id,category_id,subcategory_id';
