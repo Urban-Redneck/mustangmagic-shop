@@ -88,7 +88,8 @@ export async function GET(request: NextRequest) {
     console.log('[products API] Direct supabase returned:', directData.length, 'items');
     
     if (directData.length > 0) {
-      return NextResponse.json({ products: transformProduct(directData[0]), allProducts: directData.map(transformProduct), total: directData.length });
+      const formatted = directData.map((p: any) => transformProduct(p));
+      return NextResponse.json({ products: formatted, allProducts: formatted, total: formatted.length });
     }
 
     // Try getProducts helper
@@ -101,7 +102,7 @@ export async function GET(request: NextRequest) {
     });
 
     if (supabaseProducts && supabaseProducts.length > 0) {
-      const formatted = supabaseProducts.map(p => transformProduct(p));
+      const formatted = supabaseProducts.map((p: any) => transformProduct(p));
       return NextResponse.json({ products: formatted, total: formatted.length, source: 'supabase' });
     }
 
