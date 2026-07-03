@@ -1,9 +1,6 @@
--- MustangMagic.store Supabase V1 catalog schema
--- Scope: raw Turn14 item ingestion, curated Mustang parts catalog, Turn14
--- supplier identifiers, fitment, product images, and sync tracking.
+-- MustangMagic.store initial catalog schema
+-- Scope: curated Mustang parts catalog sourced from Turn14.
 -- Excludes: auth, users, carts, checkout, payments, and orders.
-
-begin;
 
 create extension if not exists pgcrypto;
 
@@ -33,6 +30,23 @@ create table public.brands (
   constraint brands_slug_not_blank check (length(btrim(slug)) > 0)
 );
 
+create table public.categories (
+  id uuid primary key default gen_random_uuid(),
+  parent_id uuid references public.categories(id) on delete restrict,
+  name text not null,
+  slug text not null,
+  description text,
+  sort_order integer not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  constraint categories_slug_unique unique (slug),
+  constraint categories_name_not_blank check (length(btrim(name)) > 0),
+  constraint categories_slug_not_blank check (length(btrim(slug)) > 0),
+  constraint categories_not_own_parent check (parent_id is null or parent_id <> id)
+);
+
 create table public.mustang_generations (
   id uuid primary key default gen_random_uuid(),
   slug text not null,
@@ -54,82 +68,9 @@ create table public.mustang_generations (
   )
 );
 
-create table public.categories (
-  id uuid primary key default gen_random_uuid(),
-  parent_id uuid references public.categories(id) on delete restrict,
-  name text not null,
-  slug text not null,
-  description text,
-  sort_order integer not null default 0,
-  is_active boolean not null default true,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-
-  constraint categories_slug_unique unique (slug),
-  constraint categories_name_not_blank check (length(btrim(name)) > 0),
-  constraint categories_slug_not_blank check (length(btrim(slug)) > 0),
-  constraint categories_not_own_parent check (parent_id is null or parent_id <> id)
-);
-
-create table public.turn14_items_exp (
-  id uuid primary key default gen_random_uuid(),
-  turn14_id text not null,
-  item_type text not null default 'Item',
-  product_name text not null,
-  part_number text not null,
-  mfr_part_number text not null,
-  part_description text not null,
-  category text not null,
-  subcategory text not null,
-  brand_id integer not null,
-  brand text not null,
-  price_group_id integer not null,
-  price_group text not null,
-  active boolean not null,
-  born_on_date date,
-  regular_stock boolean not null,
-  powersports_indicator boolean not null,
-  dropship_controller_id integer not null,
-  air_freight_prohibited boolean not null,
-  not_carb_approved boolean not null,
-  carb_acknowledgement_required boolean not null,
-  carb_eo_number text,
-  ltl_freight_required boolean not null,
-  prop_65 text not null,
-  epa text not null,
-  units_per_sku integer not null,
-  warehouse_availability jsonb not null default '[]'::jsonb,
-  clearance_item boolean not null,
-  thumbnail text,
-  barcode text,
-  alternate_part_number text,
-  dimensions jsonb not null default '[]'::jsonb,
-  contents jsonb not null default '[]'::jsonb,
-  raw_json jsonb not null,
-  processed_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-
-  constraint turn14_items_exp_turn14_id_unique unique (turn14_id),
-  constraint turn14_items_exp_turn14_id_not_blank check (length(btrim(turn14_id)) > 0),
-  constraint turn14_items_exp_product_name_not_blank check (length(btrim(product_name)) > 0),
-  constraint turn14_items_exp_part_number_not_blank check (length(btrim(part_number)) > 0),
-  constraint turn14_items_exp_mfr_part_number_not_blank check (length(btrim(mfr_part_number)) > 0),
-  constraint turn14_items_exp_category_not_blank check (length(btrim(category)) > 0),
-  constraint turn14_items_exp_subcategory_not_blank check (length(btrim(subcategory)) > 0),
-  constraint turn14_items_exp_brand_not_blank check (length(btrim(brand)) > 0),
-  constraint turn14_items_exp_price_group_not_blank check (length(btrim(price_group)) > 0),
-  constraint turn14_items_exp_units_per_sku_positive check (units_per_sku > 0),
-  constraint turn14_items_exp_warehouse_availability_array check (jsonb_typeof(warehouse_availability) = 'array'),
-  constraint turn14_items_exp_dimensions_array check (jsonb_typeof(dimensions) = 'array'),
-  constraint turn14_items_exp_contents_array check (jsonb_typeof(contents) = 'array'),
-  constraint turn14_items_exp_raw_json_object check (jsonb_typeof(raw_json) = 'object')
-);
-
 create table public.products (
   id uuid primary key default gen_random_uuid(),
   turn14_id text not null,
-  turn14_type text not null default 'Item',
   brand_id uuid references public.brands(id) on delete restrict,
   part_number text not null,
   manufacturer_part_number text,
@@ -186,7 +127,9 @@ create table public.products (
   constraint products_dimensions_array check (jsonb_typeof(dimensions) = 'array'),
   constraint products_warehouse_availability_array check (jsonb_typeof(warehouse_availability) = 'array'),
   constraint products_contents_array check (jsonb_typeof(contents) = 'array'),
-  constraint products_raw_turn14_json_object check (raw_turn14_json is null or jsonb_typeof(raw_turn14_json) = 'object'),
+  constraint products_raw_turn14_json_object check (
+    raw_turn14_json is null or jsonb_typeof(raw_turn14_json) = 'object'
+  ),
   constraint products_inventory_status_valid check (
     inventory_status in (
       'unknown',
@@ -298,6 +241,8 @@ add column search_document tsvector generated always as (
     coalesce(name, '') || ' ' ||
     coalesce(part_number, '') || ' ' ||
     coalesce(manufacturer_part_number, '') || ' ' ||
+    coalesce(alternate_part_number, '') || ' ' ||
+    coalesce(barcode, '') || ' ' ||
     coalesce(short_description, '') || ' ' ||
     coalesce(description, '')
   )
@@ -307,16 +252,12 @@ create trigger brands_set_updated_at
 before update on public.brands
 for each row execute function public.set_updated_at();
 
-create trigger mustang_generations_set_updated_at
-before update on public.mustang_generations
-for each row execute function public.set_updated_at();
-
 create trigger categories_set_updated_at
 before update on public.categories
 for each row execute function public.set_updated_at();
 
-create trigger turn14_items_exp_set_updated_at
-before update on public.turn14_items_exp
+create trigger mustang_generations_set_updated_at
+before update on public.mustang_generations
 for each row execute function public.set_updated_at();
 
 create trigger products_set_updated_at
@@ -339,26 +280,20 @@ create trigger sync_runs_set_updated_at
 before update on public.sync_runs
 for each row execute function public.set_updated_at();
 
--- Slug and external identifier indexes.
 create index brands_slug_idx on public.brands (slug);
 create index brands_turn14_id_idx on public.brands (turn14_id) where turn14_id is not null;
+
 create index categories_slug_idx on public.categories (slug);
+create index categories_parent_id_idx on public.categories (parent_id);
+create index categories_is_active_sort_order_idx on public.categories (is_active, sort_order);
+
 create index mustang_generations_slug_idx on public.mustang_generations (slug);
-create index turn14_items_exp_turn14_id_idx on public.turn14_items_exp (turn14_id);
+create index mustang_generations_year_range_idx
+on public.mustang_generations (start_year, end_year);
+create index mustang_generations_sort_order_idx on public.mustang_generations (sort_order);
+
 create index products_slug_idx on public.products (slug);
 create index products_turn14_id_idx on public.products (turn14_id);
-
--- Raw Turn14 export staging indexes.
-create index turn14_items_exp_brand_id_idx on public.turn14_items_exp (brand_id);
-create index turn14_items_exp_part_number_idx on public.turn14_items_exp (part_number);
-create index turn14_items_exp_mfr_part_number_idx on public.turn14_items_exp (mfr_part_number);
-create index turn14_items_exp_category_subcategory_idx
-on public.turn14_items_exp (category, subcategory);
-create index turn14_items_exp_active_idx on public.turn14_items_exp (active);
-create index turn14_items_exp_processed_at_idx on public.turn14_items_exp (processed_at);
-create index turn14_items_exp_raw_json_idx on public.turn14_items_exp using gin (raw_json);
-
--- Product listing and filtering indexes.
 create index products_brand_id_idx on public.products (brand_id);
 create index products_part_number_idx on public.products (part_number);
 create index products_manufacturer_part_number_idx
@@ -371,52 +306,34 @@ create index products_barcode_idx on public.products (barcode)
 where barcode is not null;
 create index products_turn14_category_subcategory_idx
 on public.products (turn14_category, turn14_subcategory);
-create index products_price_group_id_idx on public.products (price_group_id)
-where price_group_id is not null;
 create index products_active_idx on public.products (active);
 create index products_storefront_visible_idx on public.products (storefront_visible);
 create index products_active_storefront_visible_idx
 on public.products (active, storefront_visible);
 create index products_inventory_status_idx on public.products (inventory_status);
-create index products_price_idx on public.products (price);
 create index products_featured_idx on public.products (featured) where featured = true;
+create index products_price_idx on public.products (price);
 create index products_search_document_idx on public.products using gin (search_document);
 create index products_raw_turn14_json_idx on public.products using gin (raw_turn14_json);
 create index products_turn14_updated_at_idx
 on public.products (turn14_updated_at)
 where turn14_updated_at is not null;
-
 create unique index products_brand_part_number_unique_idx
 on public.products (brand_id, part_number)
 where brand_id is not null;
 
--- Category lookup indexes.
-create index categories_parent_id_idx on public.categories (parent_id);
-create index categories_is_active_sort_order_idx
-on public.categories (is_active, sort_order);
-create index product_categories_product_id_idx
-on public.product_categories (product_id);
-create index product_categories_category_id_idx
-on public.product_categories (category_id);
+create index product_categories_product_id_idx on public.product_categories (product_id);
+create index product_categories_category_id_idx on public.product_categories (category_id);
 create unique index product_categories_one_primary_per_product_idx
 on public.product_categories (product_id)
 where is_primary;
 
--- Fitment lookup indexes.
-create index mustang_generations_year_range_idx
-on public.mustang_generations (start_year, end_year);
-create index mustang_generations_sort_order_idx
-on public.mustang_generations (sort_order);
-create index product_fitments_product_id_idx
-on public.product_fitments (product_id);
-create index product_fitments_generation_id_idx
-on public.product_fitments (generation_id);
-create index product_fitments_year_idx
-on public.product_fitments (year);
+create index product_fitments_product_id_idx on public.product_fitments (product_id);
+create index product_fitments_generation_id_idx on public.product_fitments (generation_id);
+create index product_fitments_year_idx on public.product_fitments (year);
 create index product_fitments_generation_year_idx
 on public.product_fitments (generation_id, year);
-create index product_fitments_engine_idx
-on public.product_fitments (engine)
+create index product_fitments_engine_idx on public.product_fitments (engine)
 where engine is not null;
 create index product_fitments_source_fitment_id_idx
 on public.product_fitments (source, source_fitment_id)
@@ -432,11 +349,8 @@ on public.product_fitments (
   coalesce(source_fitment_id, '')
 );
 
--- Product image indexes.
-create index product_images_product_id_idx
-on public.product_images (product_id);
-create index product_images_turn14_id_idx
-on public.product_images (turn14_id)
+create index product_images_product_id_idx on public.product_images (product_id);
+create index product_images_turn14_id_idx on public.product_images (turn14_id)
 where turn14_id is not null;
 create index product_images_product_sort_order_idx
 on public.product_images (product_id, sort_order);
@@ -447,10 +361,7 @@ create unique index product_images_one_primary_per_product_idx
 on public.product_images (product_id)
 where is_primary;
 
--- Sync monitoring indexes.
 create index sync_runs_source_sync_type_started_at_idx
 on public.sync_runs (source, sync_type, started_at desc);
 create index sync_runs_status_started_at_idx
 on public.sync_runs (status, started_at desc);
-
-commit;
