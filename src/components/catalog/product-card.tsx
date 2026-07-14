@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import type { ProductListItem } from "@/types/catalog";
 
@@ -11,12 +12,14 @@ export function ProductCard({ product }: ProductCardProps) {
       href={`/products/${product.slug}`}
       className="group grid overflow-hidden rounded border border-zinc-200 bg-white transition hover:border-zinc-400 hover:shadow-sm"
     >
-      <div className="aspect-[4/3] bg-zinc-100">
+      <div className="relative aspect-[4/3] bg-zinc-100">
         {product.primaryImageUrl ? (
-          <div
-            aria-label={product.name}
-            className="h-full w-full bg-contain bg-center bg-no-repeat transition group-hover:scale-[1.02]"
-            style={{ backgroundImage: `url(${product.primaryImageUrl})` }}
+          <Image
+            src={product.primaryImageUrl}
+            alt={product.name}
+            fill
+            sizes="(min-width: 1280px) 25vw, (min-width: 768px) 33vw, 100vw"
+            className="object-contain p-3 transition group-hover:scale-[1.02]"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#18181b_0%,#3f3f46_58%,#b91c1c_100%)] px-6 text-center text-sm font-black uppercase tracking-[0.16em] text-white">
@@ -61,5 +64,9 @@ function formatPrice(price: number | null) {
 }
 
 function formatInventory(status: string) {
+  if (status === "special_order" || status === "unknown") {
+    return "Call for availability";
+  }
+
   return status.replaceAll("_", " ");
 }

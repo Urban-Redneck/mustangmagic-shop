@@ -1,7 +1,8 @@
 -- MustangMagic.store Supabase V1 catalog schema
 -- Scope: raw Turn14 item ingestion, curated Mustang parts catalog, Turn14
--- supplier identifiers, fitment, product images, and sync tracking.
--- Excludes: auth, users, carts, checkout, payments, and orders.
+-- supplier identifiers, fitment, product images, sync tracking, and
+-- Stripe-backed order capture.
+-- Excludes: auth, users, and cart persistence.
 
 begin;
 
@@ -143,11 +144,17 @@ create table public.products (
   turn14_subcategory text,
   primary_image_url text,
   price numeric(12, 2),
+  manual_price numeric(12, 2),
+  manual_price_reason text,
+  manual_price_updated_at timestamptz,
   map_price numeric(12, 2),
   msrp numeric(12, 2),
   price_group_id integer,
   price_group text,
   inventory_status text not null default 'unknown',
+  inventory_quantity integer,
+  inventory_updated_at timestamptz,
+  inventory_eta jsonb,
   active boolean not null default false,
   storefront_visible boolean not null default false,
   featured boolean not null default false,
@@ -169,6 +176,7 @@ create table public.products (
   warehouse_availability jsonb not null default '[]'::jsonb,
   contents jsonb not null default '[]'::jsonb,
   raw_turn14_json jsonb,
+  raw_turn14_inventory_json jsonb,
   turn14_updated_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -181,12 +189,18 @@ create table public.products (
   constraint products_slug_not_blank check (length(btrim(slug)) > 0),
   constraint products_units_per_sku_positive check (units_per_sku is null or units_per_sku > 0),
   constraint products_price_non_negative check (price is null or price >= 0),
+  constraint products_manual_price_non_negative check (manual_price is null or manual_price >= 0),
   constraint products_map_price_non_negative check (map_price is null or map_price >= 0),
   constraint products_msrp_non_negative check (msrp is null or msrp >= 0),
   constraint products_dimensions_array check (jsonb_typeof(dimensions) = 'array'),
   constraint products_warehouse_availability_array check (jsonb_typeof(warehouse_availability) = 'array'),
   constraint products_contents_array check (jsonb_typeof(contents) = 'array'),
   constraint products_raw_turn14_json_object check (raw_turn14_json is null or jsonb_typeof(raw_turn14_json) = 'object'),
+  constraint products_inventory_quantity_non_negative check (inventory_quantity is null or inventory_quantity >= 0),
+  constraint products_inventory_eta_object check (inventory_eta is null or jsonb_typeof(inventory_eta) = 'object'),
+  constraint products_raw_turn14_inventory_json_object check (
+    raw_turn14_inventory_json is null or jsonb_typeof(raw_turn14_inventory_json) = 'object'
+  ),
   constraint products_inventory_status_valid check (
     inventory_status in (
       'unknown',
@@ -291,6 +305,152 @@ create table public.sync_runs (
   )
 );
 
+create table public.checkout_intents (
+  id uuid primary key default gen_random_uuid(),
+  status text not null default 'address_collected',
+  cart_items jsonb not null,
+  contact_name text not null,
+  contact_email text not null,
+  contact_phone text not null,
+  shipping_address jsonb not null,
+  billing_address jsonb not null,
+  billing_same_as_shipping boolean not null default true,
+  stripe_checkout_session_id text,
+  stripe_payment_intent_id text,
+  turn14_quote_id text,
+  turn14_order_id text,
+  turn14_quote_payload jsonb,
+  turn14_selected_shipping jsonb,
+  turn14_order_payload jsonb,
+  turn14_order_error text,
+  turn14_order_submitted_at timestamptz,
+  shipping_amount integer not null default 0,
+  fee_amount integer not null default 0,
+  acknowledge_prop_65 boolean not null default false,
+  acknowledge_epa boolean not null default false,
+  acknowledge_carb boolean not null default false,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  constraint checkout_intents_status_valid check (
+    status in (
+      'address_collected',
+      'turn14_quoted',
+      'stripe_session_created',
+      'paid',
+      'refunded',
+      'turn14_order_submitted',
+      'turn14_order_failed',
+      'cancelled',
+      'expired',
+      'failed'
+    )
+  ),
+  constraint checkout_intents_cart_items_array check (jsonb_typeof(cart_items) = 'array'),
+  constraint checkout_intents_contact_name_not_blank check (length(btrim(contact_name)) > 0),
+  constraint checkout_intents_contact_email_not_blank check (length(btrim(contact_email)) > 0),
+  constraint checkout_intents_contact_phone_not_blank check (length(btrim(contact_phone)) > 0),
+  constraint checkout_intents_shipping_address_object check (jsonb_typeof(shipping_address) = 'object'),
+  constraint checkout_intents_billing_address_object check (jsonb_typeof(billing_address) = 'object'),
+  constraint checkout_intents_turn14_quote_payload_object check (
+    turn14_quote_payload is null or jsonb_typeof(turn14_quote_payload) = 'object'
+  ),
+  constraint checkout_intents_turn14_selected_shipping_array check (
+    turn14_selected_shipping is null or jsonb_typeof(turn14_selected_shipping) = 'array'
+  ),
+  constraint checkout_intents_turn14_order_payload_object check (
+    turn14_order_payload is null or jsonb_typeof(turn14_order_payload) = 'object'
+  ),
+  constraint checkout_intents_shipping_amount_non_negative check (shipping_amount >= 0),
+  constraint checkout_intents_fee_amount_non_negative check (fee_amount >= 0),
+  constraint checkout_intents_metadata_object check (jsonb_typeof(metadata) = 'object'),
+  constraint checkout_intents_stripe_session_unique unique (stripe_checkout_session_id)
+);
+
+create table public.store_orders (
+  id uuid primary key default gen_random_uuid(),
+  stripe_checkout_session_id text not null,
+  stripe_payment_intent_id text,
+  stripe_customer_id text,
+  turn14_quote_id text,
+  turn14_order_id text,
+  status text not null default 'paid',
+  payment_status text not null,
+  fulfillment_status text not null default 'pending',
+  amount_subtotal integer,
+  amount_total integer not null,
+  currency text not null default 'usd',
+  customer_email text,
+  customer_name text,
+  customer_phone text,
+  billing_address jsonb,
+  shipping_address jsonb,
+  metadata jsonb not null default '{}'::jsonb,
+  raw_stripe_session jsonb not null,
+  paid_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  constraint store_orders_stripe_checkout_session_id_unique unique (stripe_checkout_session_id),
+  constraint store_orders_stripe_checkout_session_id_not_blank check (length(btrim(stripe_checkout_session_id)) > 0),
+  constraint store_orders_status_valid check (status in ('pending', 'paid', 'cancelled', 'refunded', 'failed')),
+  constraint store_orders_payment_status_not_blank check (length(btrim(payment_status)) > 0),
+  constraint store_orders_fulfillment_status_valid check (
+    fulfillment_status in ('pending', 'reviewing', 'ready_to_order', 'ordered', 'partially_fulfilled', 'fulfilled', 'cancelled')
+  ),
+  constraint store_orders_amount_subtotal_non_negative check (amount_subtotal is null or amount_subtotal >= 0),
+  constraint store_orders_amount_total_non_negative check (amount_total >= 0),
+  constraint store_orders_currency_not_blank check (length(btrim(currency)) > 0),
+  constraint store_orders_billing_address_object check (billing_address is null or jsonb_typeof(billing_address) = 'object'),
+  constraint store_orders_shipping_address_object check (shipping_address is null or jsonb_typeof(shipping_address) = 'object'),
+  constraint store_orders_metadata_object check (jsonb_typeof(metadata) = 'object'),
+  constraint store_orders_raw_stripe_session_object check (jsonb_typeof(raw_stripe_session) = 'object')
+);
+
+create table public.store_order_items (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.store_orders(id) on delete cascade,
+  product_id uuid references public.products(id) on delete set null,
+  turn14_id text,
+  part_number text,
+  product_name text not null,
+  quantity integer not null,
+  unit_amount integer not null,
+  amount_total integer not null,
+  currency text not null default 'usd',
+  stripe_line_item_id text,
+  stripe_product_id text,
+  raw_stripe_line_item jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  constraint store_order_items_quantity_positive check (quantity > 0),
+  constraint store_order_items_unit_amount_non_negative check (unit_amount >= 0),
+  constraint store_order_items_amount_total_non_negative check (amount_total >= 0),
+  constraint store_order_items_product_name_not_blank check (length(btrim(product_name)) > 0),
+  constraint store_order_items_currency_not_blank check (length(btrim(currency)) > 0),
+  constraint store_order_items_raw_stripe_line_item_object check (jsonb_typeof(raw_stripe_line_item) = 'object')
+);
+
+create table public.stripe_webhook_events (
+  id uuid primary key default gen_random_uuid(),
+  stripe_event_id text not null,
+  event_type text not null,
+  api_version text,
+  livemode boolean not null default false,
+  payload jsonb not null,
+  processed_at timestamptz,
+  processing_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  constraint stripe_webhook_events_stripe_event_id_unique unique (stripe_event_id),
+  constraint stripe_webhook_events_stripe_event_id_not_blank check (length(btrim(stripe_event_id)) > 0),
+  constraint stripe_webhook_events_event_type_not_blank check (length(btrim(event_type)) > 0),
+  constraint stripe_webhook_events_payload_object check (jsonb_typeof(payload) = 'object')
+);
+
 alter table public.products
 add column search_document tsvector generated always as (
   to_tsvector(
@@ -339,6 +499,22 @@ create trigger sync_runs_set_updated_at
 before update on public.sync_runs
 for each row execute function public.set_updated_at();
 
+create trigger checkout_intents_set_updated_at
+before update on public.checkout_intents
+for each row execute function public.set_updated_at();
+
+create trigger store_orders_set_updated_at
+before update on public.store_orders
+for each row execute function public.set_updated_at();
+
+create trigger store_order_items_set_updated_at
+before update on public.store_order_items
+for each row execute function public.set_updated_at();
+
+create trigger stripe_webhook_events_set_updated_at
+before update on public.stripe_webhook_events
+for each row execute function public.set_updated_at();
+
 -- Slug and external identifier indexes.
 create index brands_slug_idx on public.brands (slug);
 create index brands_turn14_id_idx on public.brands (turn14_id) where turn14_id is not null;
@@ -378,7 +554,16 @@ create index products_storefront_visible_idx on public.products (storefront_visi
 create index products_active_storefront_visible_idx
 on public.products (active, storefront_visible);
 create index products_inventory_status_idx on public.products (inventory_status);
+create index products_inventory_quantity_idx
+on public.products (inventory_quantity)
+where inventory_quantity is not null;
+create index products_inventory_updated_at_idx
+on public.products (inventory_updated_at)
+where inventory_updated_at is not null;
 create index products_price_idx on public.products (price);
+create index products_manual_price_idx
+on public.products (manual_price)
+where manual_price is not null;
 create index products_featured_idx on public.products (featured) where featured = true;
 create index products_search_document_idx on public.products using gin (search_document);
 create index products_raw_turn14_json_idx on public.products using gin (raw_turn14_json);
@@ -452,5 +637,71 @@ create index sync_runs_source_sync_type_started_at_idx
 on public.sync_runs (source, sync_type, started_at desc);
 create index sync_runs_status_started_at_idx
 on public.sync_runs (status, started_at desc);
+
+-- Checkout intent indexes.
+create index checkout_intents_created_at_idx
+on public.checkout_intents (created_at desc);
+create index checkout_intents_status_idx
+on public.checkout_intents (status);
+create index checkout_intents_contact_email_idx
+on public.checkout_intents (contact_email);
+create index checkout_intents_payment_intent_idx
+on public.checkout_intents (stripe_payment_intent_id)
+where stripe_payment_intent_id is not null;
+create index checkout_intents_turn14_quote_id_idx
+on public.checkout_intents (turn14_quote_id)
+where turn14_quote_id is not null;
+create index checkout_intents_turn14_order_id_idx
+on public.checkout_intents (turn14_order_id)
+where turn14_order_id is not null;
+
+-- Order capture indexes.
+create index store_orders_created_at_idx
+on public.store_orders (created_at desc);
+create index store_orders_payment_intent_idx
+on public.store_orders (stripe_payment_intent_id)
+where stripe_payment_intent_id is not null;
+create index store_orders_fulfillment_status_idx
+on public.store_orders (fulfillment_status);
+create index store_orders_customer_email_idx
+on public.store_orders (customer_email)
+where customer_email is not null;
+create index store_orders_turn14_quote_id_idx
+on public.store_orders (turn14_quote_id)
+where turn14_quote_id is not null;
+create index store_orders_turn14_order_id_idx
+on public.store_orders (turn14_order_id)
+where turn14_order_id is not null;
+create index store_order_items_order_id_idx
+on public.store_order_items (order_id);
+create index store_order_items_product_id_idx
+on public.store_order_items (product_id)
+where product_id is not null;
+create index store_order_items_turn14_id_idx
+on public.store_order_items (turn14_id)
+where turn14_id is not null;
+create index store_order_items_part_number_idx
+on public.store_order_items (part_number)
+where part_number is not null;
+create index stripe_webhook_events_event_type_created_at_idx
+on public.stripe_webhook_events (event_type, created_at desc);
+create index stripe_webhook_events_processed_at_idx
+on public.stripe_webhook_events (processed_at)
+where processed_at is not null;
+
+grant usage on schema public to service_role;
+grant select, insert, update, delete on table public.brands to service_role;
+grant select, insert, update, delete on table public.categories to service_role;
+grant select, insert, update, delete on table public.mustang_generations to service_role;
+grant select, insert, update, delete on table public.turn14_items_exp to service_role;
+grant select, insert, update, delete on table public.products to service_role;
+grant select, insert, update, delete on table public.product_categories to service_role;
+grant select, insert, update, delete on table public.product_fitments to service_role;
+grant select, insert, update, delete on table public.product_images to service_role;
+grant select, insert, update, delete on table public.sync_runs to service_role;
+grant select, insert, update, delete on table public.checkout_intents to service_role;
+grant select, insert, update, delete on table public.store_orders to service_role;
+grant select, insert, update, delete on table public.store_order_items to service_role;
+grant select, insert, update, delete on table public.stripe_webhook_events to service_role;
 
 commit;

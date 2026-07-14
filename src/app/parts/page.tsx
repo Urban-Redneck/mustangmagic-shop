@@ -15,23 +15,31 @@ export const metadata: Metadata = {
   description: "Browse Mustang performance parts by category, brand, and generation.",
 };
 
-type PartsPageProps = {
-  searchParams: Promise<{
-    q?: string;
-    brand?: string;
-    category?: string;
-    generation?: string;
-  }>;
+type PartsSearchParams = {
+  brand?: string | string[];
+  category?: string | string[];
+  generation?: string | string[];
+  q?: string | string[];
+  query?: string | string[];
 };
 
-export default async function PartsPage({ searchParams }: PartsPageProps) {
-  const params = await searchParams;
+export default async function PartsPage({
+  searchParams,
+}: {
+  searchParams: Promise<PartsSearchParams>;
+}) {
+  const filters = await searchParams;
+  const selectedBrand = firstParam(filters.brand);
+  const selectedCategory = firstParam(filters.category);
+  const selectedGeneration = firstParam(filters.generation);
+  const searchQuery = firstParam(filters.q) ?? firstParam(filters.query);
+
   const [products, brands, categories, generations] = await Promise.all([
     getProducts({
-      query: params.q,
-      brand: params.brand,
-      category: params.category,
-      generation: params.generation,
+      brand: selectedBrand,
+      category: selectedCategory,
+      generation: selectedGeneration,
+      query: searchQuery,
       limit: 36,
     }),
     getBrands(12),
@@ -45,33 +53,39 @@ export default async function PartsPage({ searchParams }: PartsPageProps) {
         <PageHeading
           eyebrow="Parts"
           title="Mustang performance catalog"
-          description="Filter the synced Turn14 catalog by fitment, brand, category, or search term."
+          description="Filter the Mustang Magic catalog by fitment, brand, category, or search term."
         />
         <div className="mt-8">
-          <SearchForm defaultValue={params.q} action="/parts" />
+          <SearchForm action="/parts" defaultValue={searchQuery ?? ""} />
         </div>
 
         <div className="mt-10 grid gap-8 lg:grid-cols-[18rem_1fr]">
           <aside className="grid h-fit gap-6">
             <FilterGroup
               title="Generations"
+              emptyText="Add Mustang generations in Supabase to enable generation filters."
               items={generations.map((generation) => ({
                 href: `/parts?generation=${generation.slug}`,
                 label: generation.name,
+                active: selectedGeneration === generation.slug,
               }))}
             />
             <FilterGroup
               title="Categories"
+              emptyText="Add curated Mustang Magic categories in Supabase to enable category filters."
               items={categories.map((category) => ({
                 href: `/parts?category=${category.slug}`,
                 label: category.name,
+                active: selectedCategory === category.slug,
               }))}
             />
             <FilterGroup
               title="Brands"
+              emptyText="Brands will appear after Mustang products are imported."
               items={brands.map((brand) => ({
                 href: `/parts?brand=${brand.slug}`,
                 label: brand.name,
+                active: selectedBrand === brand.slug,
               }))}
             />
           </aside>
@@ -114,10 +128,12 @@ export default async function PartsPage({ searchParams }: PartsPageProps) {
 
 function FilterGroup({
   title,
+  emptyText,
   items,
 }: {
   title: string;
-  items: Array<{ href: string; label: string }>;
+  emptyText: string;
+  items: Array<{ href: string; label: string; active?: boolean }>;
 }) {
   return (
     <div className="rounded border border-zinc-200 bg-white p-4">
@@ -130,7 +146,12 @@ function FilterGroup({
             <a
               key={item.href}
               href={item.href}
-              className="rounded px-2 py-2 text-sm font-semibold text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950"
+              className={[
+                "rounded px-2 py-2 text-sm font-semibold hover:bg-zinc-100 hover:text-zinc-950",
+                item.active
+                  ? "bg-zinc-950 text-white hover:bg-zinc-800 hover:text-white"
+                  : "text-zinc-600",
+              ].join(" ")}
             >
               {item.label}
             </a>
@@ -138,9 +159,17 @@ function FilterGroup({
         </div>
       ) : (
         <p className="mt-3 text-sm leading-6 text-zinc-500">
-          Waiting for synced catalog data.
+          {emptyText}
         </p>
       )}
     </div>
   );
+}
+
+function firstParam(value: string | string[] | undefined) {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }

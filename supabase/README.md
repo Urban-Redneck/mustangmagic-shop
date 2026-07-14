@@ -178,6 +178,9 @@ Key fields:
 - `price_group_id`
 - `price_group`
 - `inventory_status`
+- `inventory_quantity`
+- `inventory_updated_at`
+- `inventory_eta`
 - `active`
 - `storefront_visible`
 - `featured`
@@ -187,6 +190,7 @@ Key fields:
 - `warehouse_availability`
 - `contents`
 - `raw_turn14_json`
+- `raw_turn14_inventory_json`
 - `turn14_updated_at`
 - `search_document`
 - `created_at`
@@ -195,6 +199,14 @@ Key fields:
 Important curation rule:
 
 `active` and `storefront_visible` default to `false`. Turn14 imports should not automatically publish products to the website.
+
+Important pricing rule:
+
+Turn14 item/product exports may include `price_group_id` and `price_group`, but those are not storefront sell prices. Populate `products.price`, `products.map_price`, and `products.msrp` only from a dedicated Turn14 pricing request/feed, and track that job as `sync_runs.sync_type = 'pricing'`.
+
+Important inventory rule:
+
+Turn14 item/product exports may include `regular_stock` and `warehouse_availability`, but those fields are not actual on-hand quantities. Populate `products.inventory_quantity`, `products.inventory_eta`, `products.raw_turn14_inventory_json`, and current `products.inventory_status` only from the Turn14 Inventory endpoint, and track that job as `sync_runs.sync_type = 'inventory'`.
 
 Allowed `inventory_status` values:
 
@@ -298,6 +310,8 @@ Turn14 import code should:
 - Store Turn14 part numbers in `products.part_number` and/or `products.manufacturer_part_number`.
 - Store Turn14 category/subcategory in `products.turn14_category` and `products.turn14_subcategory`.
 - Store dimensions, warehouse availability, kit contents, compliance flags, barcode, and freight flags.
+- Fetch pricing through a separate Turn14 pricing request/feed; do not treat `price_group` as `price`.
+- Match pricing back to products by Turn14 item ID when available, or by brand plus part number when the pricing source does not provide item IDs.
 - Store complete upstream payloads in `products.raw_turn14_json`.
 - Insert images into `product_images`.
 - Map products to curated categories through `product_categories`.

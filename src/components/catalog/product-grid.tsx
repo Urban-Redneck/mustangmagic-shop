@@ -10,7 +10,7 @@ type ProductGridProps = {
 export function ProductGrid({
   products,
   emptyTitle = "No products found",
-  emptyText = "Sync Turn14 product data into Supabase to populate this view.",
+  emptyText = "Add catalog products to populate this view.",
 }: ProductGridProps) {
   if (products.length === 0) {
     return (

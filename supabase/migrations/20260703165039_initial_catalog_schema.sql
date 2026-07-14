@@ -365,3 +365,13 @@ create index sync_runs_source_sync_type_started_at_idx
 on public.sync_runs (source, sync_type, started_at desc);
 create index sync_runs_status_started_at_idx
 on public.sync_runs (status, started_at desc);
+
+grant usage on schema public to service_role;
+grant select, insert, update, delete on table public.brands to service_role;
+grant select, insert, update, delete on table public.categories to service_role;
+grant select, insert, update, delete on table public.mustang_generations to service_role;
+grant select, insert, update, delete on table public.products to service_role;
+grant select, insert, update, delete on table public.product_categories to service_role;
+grant select, insert, update, delete on table public.product_fitments to service_role;
+grant select, insert, update, delete on table public.product_images to service_role;
+grant select, insert, update, delete on table public.sync_runs to service_role;

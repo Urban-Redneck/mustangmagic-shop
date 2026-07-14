@@ -34,12 +34,37 @@ export type ProductListItem = {
   primaryImageUrl: string | null;
   price: number | null;
   inventoryStatus: string;
+  canPurchase: boolean;
 };
 
 export type ProductDetail = ProductListItem & {
   description: string | null;
   mapPrice: number | null;
   msrp: number | null;
+  images: Array<{
+    id: string;
+    url: string;
+    altText: string | null;
+    width: number | null;
+    height: number | null;
+    isPrimary: boolean;
+  }>;
+  shopNotes: {
+    recommended: boolean;
+    shopNotes: string | null;
+    horsepowerGain: number | null;
+    torqueGain: number | null;
+    difficulty: number | null;
+    laborHours: number | null;
+    tuneRequired: boolean;
+    featured: boolean;
+    lastUpdated: string;
+  } | null;
+  installTips: Array<{
+    id: string;
+    tip: string;
+    sortOrder: number;
+  }>;
   categories: Category[];
   fitments: Array<{
     year: number;

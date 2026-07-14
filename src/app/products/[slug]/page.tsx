@@ -1,11 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getProductBySlug } from "@/lib/catalog/queries";
+import { ProductGallery } from "@/components/catalog/product-gallery";
+import { getProductBySlug, getProductSlugs } from "@/lib/catalog/queries";
 
 type ProductPageProps = {
   params: Promise<{ slug: string }>;
 };
+
+export const dynamic = "force-dynamic";
+
+export async function generateStaticParams() {
+  const slugs = await getProductSlugs();
+
+  return slugs.map((slug) => ({
+    slug,
+  }));
+}
 
 export async function generateMetadata({
   params,
@@ -35,6 +46,21 @@ export default async function ProductPage({ params }: ProductPageProps) {
     notFound();
   }
 
+  const galleryImages =
+    product.images.length > 0
+      ? product.images
+      : product.primaryImageUrl
+        ? [
+            {
+              id: "primary",
+              url: product.primaryImageUrl,
+              altText: product.name,
+              width: null,
+              height: null,
+              isPrimary: true,
+            },
+          ]
+        : [];
   return (
     <main className="bg-zinc-50">
       <div className="mx-auto max-w-7xl px-5 py-10 lg:px-8">
@@ -46,21 +72,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
         </Link>
 
         <section className="mt-6 grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">
-          <div className="overflow-hidden rounded border border-zinc-200 bg-white">
-            <div className="aspect-[4/3] bg-zinc-100">
-              {product.primaryImageUrl ? (
-                <div
-                  aria-label={product.name}
-                  className="h-full w-full bg-contain bg-center bg-no-repeat"
-                  style={{ backgroundImage: `url(${product.primaryImageUrl})` }}
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#18181b_0%,#3f3f46_58%,#b91c1c_100%)] px-6 text-center text-sm font-black uppercase tracking-[0.16em] text-white">
-                  MustangMagic
-                </div>
-              )}
-            </div>
-          </div>
+          <ProductGallery images={galleryImages} productName={product.name} />
 
           <div>
             <p className="text-sm font-black uppercase tracking-[0.18em] text-red-700">
@@ -83,7 +95,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
               <Fact label="MAP" value={formatPrice(product.mapPrice)} />
               <Fact
                 label="Availability"
-                value={product.inventoryStatus.replaceAll("_", " ")}
+                value={formatInventoryStatus(product.inventoryStatus)}
               />
             </div>
 
@@ -91,22 +103,121 @@ export default async function ProductPage({ params }: ProductPageProps) {
               <h2 className="text-sm font-black uppercase tracking-[0.14em] text-zinc-950">
                 Purchase status
               </h2>
-              <p className="mt-3 text-sm leading-6 text-zinc-600">
-                Checkout is not enabled yet. Product pricing and availability
-                are displayed from the synced catalog and will be validated
-                server-side before future checkout.
-              </p>
+              {canStartCheckout(
+                product.price,
+                product.inventoryStatus,
+                product.canPurchase,
+              ) ? (
+                <form action="/api/cart" method="post" className="mt-4 grid gap-4">
+                  <input type="hidden" name="action" value="add" />
+                  <input type="hidden" name="productId" value={product.id} />
+                  <input type="hidden" name="returnTo" value="/cart" />
+                  <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                    Quantity
+                    <input
+                      type="number"
+                      name="quantity"
+                      min="1"
+                      max="10"
+                      defaultValue="1"
+                      className="h-11 w-24 rounded border border-zinc-300 bg-white px-3 text-base font-semibold text-zinc-950"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="inline-flex w-fit rounded bg-red-700 px-5 py-3 text-sm font-black uppercase tracking-wide text-white hover:bg-red-800"
+                  >
+                    Add to cart
+                  </button>
+                  <p className="text-xs leading-5 text-zinc-500">
+                    Your cart stores only product IDs and quantities. Price and
+                    availability are revalidated on the server before Stripe
+                    checkout opens.
+                  </p>
+                </form>
+              ) : (
+                <p className="mt-3 text-sm leading-6 text-zinc-600">
+                  This product is not available for online checkout right now.
+                  Contact Mustang Magic for current price and availability.
+                </p>
+              )}
             </div>
           </div>
         </section>
 
         <section className="mt-10 grid gap-8 lg:grid-cols-[1fr_22rem]">
-          <div className="rounded border border-zinc-200 bg-white p-6">
-            <h2 className="text-2xl font-black text-zinc-950">Details</h2>
-            <p className="mt-4 whitespace-pre-line text-sm leading-7 text-zinc-700">
-              {product.description ??
-                "Detailed product copy will appear here after the Turn14 importer syncs this product description."}
-            </p>
+          <div className="grid gap-6">
+            <div className="rounded border border-zinc-200 bg-white p-6">
+              <h2 className="text-2xl font-black text-zinc-950">Details</h2>
+              <p className="mt-4 whitespace-pre-line text-sm leading-7 text-zinc-700">
+                {product.description ??
+                  "Detailed product copy will appear here after this catalog item is updated."}
+              </p>
+            </div>
+
+            {product.shopNotes ? (
+              <div className="rounded border border-zinc-200 bg-white p-6">
+                <h2 className="text-2xl font-black text-zinc-950">
+                  Mustang Magic notes
+                </h2>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <Fact
+                    label="Recommended"
+                    value={product.shopNotes.recommended ? "Yes" : "No"}
+                  />
+                  <Fact
+                    label="Tune Required"
+                    value={product.shopNotes.tuneRequired ? "Yes" : "No"}
+                  />
+                  <Fact
+                    label="Labor"
+                    value={formatLaborHours(product.shopNotes.laborHours)}
+                  />
+                  <Fact
+                    label="Difficulty"
+                    value={formatDifficulty(product.shopNotes.difficulty)}
+                  />
+                  {product.shopNotes.horsepowerGain !== null ? (
+                    <Fact
+                      label="Horsepower"
+                      value={`+${product.shopNotes.horsepowerGain} hp`}
+                    />
+                  ) : null}
+                  {product.shopNotes.torqueGain !== null ? (
+                    <Fact
+                      label="Torque"
+                      value={`+${product.shopNotes.torqueGain} lb-ft`}
+                    />
+                  ) : null}
+                </div>
+                {product.shopNotes.shopNotes ? (
+                  <p className="mt-5 whitespace-pre-line text-sm leading-7 text-zinc-700">
+                    {product.shopNotes.shopNotes}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {product.installTips.length > 0 ? (
+              <div className="rounded border border-zinc-200 bg-white p-6">
+                <h2 className="text-2xl font-black text-zinc-950">
+                  Install tips
+                </h2>
+                <ol className="mt-4 grid gap-3">
+                  {product.installTips.map((tip, index) => (
+                    <li
+                      key={tip.id}
+                      className="flex gap-3 border-b border-zinc-100 pb-3 text-sm leading-6 text-zinc-700 last:border-b-0 last:pb-0"
+                    >
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-zinc-100 text-xs font-black text-zinc-700">
+                        {index + 1}
+                      </span>
+                      <span>{tip.tip}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ) : null}
           </div>
 
           <div className="grid gap-6">
@@ -184,4 +295,42 @@ function formatPrice(price: number | null) {
     style: "currency",
     currency: "USD",
   }).format(price);
+}
+
+function formatInventoryStatus(status: string) {
+  if (status === "special_order" || status === "unknown") {
+    return "Call for availability";
+  }
+
+  return status.replaceAll("_", " ");
+}
+
+function canStartCheckout(
+  price: number | null,
+  inventoryStatus: string,
+  canPurchase: boolean,
+) {
+  return (
+    canPurchase &&
+    price !== null &&
+    price > 0 &&
+    ["in_stock", "low_stock"].includes(inventoryStatus)
+  );
+}
+
+function formatLaborHours(hours: number | null) {
+  if (hours === null) {
+    return "Call";
+  }
+
+  const label = Number.isInteger(hours) ? hours.toFixed(0) : hours.toFixed(1);
+  return `${label} ${hours === 1 ? "hour" : "hours"}`;
+}
+
+function formatDifficulty(difficulty: number | null) {
+  if (difficulty === null) {
+    return "Call";
+  }
+
+  return `${difficulty} ${difficulty === 1 ? "wrench" : "wrenches"}`;
 }

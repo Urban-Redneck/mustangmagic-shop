@@ -17,11 +17,11 @@ export default async function BrandsPage() {
         <PageHeading
           eyebrow="Brands"
           title="Shop by manufacturer"
-          description="Find synced Turn14 products by brand once importer data is available in Supabase."
+          description="Find Mustang Magic catalog products by manufacturer and brand."
         />
         <div className="mt-8">
           <CatalogLinks
-            emptyText="Sync Turn14 brands into Supabase to populate this page."
+            emptyText="Add brands to the catalog to populate this page."
             items={brands.map((brand) => ({
               href: `/parts?brand=${brand.slug}`,
               title: brand.name,

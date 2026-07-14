@@ -9,7 +9,6 @@ This script intentionally avoids third-party Python dependencies. It talks to:
 Required environment variables:
   SUPABASE_URL
   SUPABASE_SERVICE_ROLE_KEY
-  TURN14_API_BASE_URL
 
 Turn14 auth options:
   TURN14_ACCESS_TOKEN
@@ -311,6 +310,7 @@ def main() -> int:
     parser.add_argument("--reset", action="store_true", help="Ignore saved pagination state.")
     parser.add_argument("--start-page", type=int, help="Start at this page number.")
     parser.add_argument("--max-pages", type=int, help="Stop after this many pages.")
+    parser.add_argument("--max-records", type=int, help="Stop after this many product records.")
     parser.add_argument("--state-file", help="Override the resumable state file path.")
     parser.add_argument("--dry-run", action="store_true", help="Download and normalize without writing.")
     args = parser.parse_args()
@@ -336,6 +336,7 @@ def main() -> int:
             state_file=config.state_file,
             start_page=page,
             max_pages=args.max_pages,
+            max_records=args.max_records,
             dry_run=args.dry_run,
         )
 
@@ -357,6 +358,7 @@ def run_sync(
     state_file: Path,
     start_page: int,
     max_pages: int | None,
+    max_records: int | None,
     dry_run: bool,
 ) -> dict[str, Any]:
     page = start_page
@@ -371,6 +373,7 @@ def run_sync(
         "records_seen": 0,
         "records_upserted": 0,
         "records_failed": 0,
+        "max_records": max_records,
         "dry_run": dry_run,
     }
 
@@ -383,6 +386,11 @@ def run_sync(
             summary["last_page"] = page
             summary["next_page"] = None
             break
+        if max_records is not None:
+            remaining = max_records - summary["records_seen"]
+            if remaining <= 0:
+                break
+            products = products[:remaining]
 
         page_result = sync_products_page(
             supabase=supabase,
@@ -401,6 +409,9 @@ def run_sync(
         page += 1
         summary["next_page"] = page
         save_state(state_file, summary)
+
+        if max_records is not None and summary["records_seen"] >= max_records:
+            break
 
         if not next_url and len(products) == 0:
             break
@@ -478,8 +489,13 @@ def sync_products_page(
 
 
 def normalize_product(raw: dict[str, Any]) -> dict[str, Any]:
+    attrs = raw.get("attributes")
+    source = dict(attrs) if isinstance(attrs, dict) else dict(raw)
+    source.setdefault("id", raw.get("id"))
+    source.setdefault("type", raw.get("type"))
+
     turn14_id = first_string(
-        raw,
+        source,
         "turn14_id",
         "id",
         "product_id",
@@ -490,9 +506,9 @@ def normalize_product(raw: dict[str, Any]) -> dict[str, Any]:
     if not turn14_id:
         raise SyncError("product is missing Turn14 product id")
 
-    part_number = first_string(raw, "part_number", "partNumber", "mfr_part_number", "sku")
-    name = first_string(raw, "name", "title", "product_name", "description.name")
-    brand_name = first_string(raw, "brand.name", "brand", "manufacturer.name", "manufacturer")
+    part_number = first_string(source, "part_number", "partNumber", "mfr_part_number", "sku")
+    name = first_string(source, "name", "title", "product_name", "description.name")
+    brand_name = first_string(source, "brand.name", "brand", "manufacturer.name", "manufacturer")
 
     if not part_number:
         part_number = turn14_id
@@ -500,41 +516,83 @@ def normalize_product(raw: dict[str, Any]) -> dict[str, Any]:
         name = f"{brand_name or 'Turn14'} {part_number}".strip()
 
     slug = make_uniqueish_slug([brand_name, part_number, name, turn14_id])
-    inventory_status = normalize_inventory_status(
-        first_string(raw, "inventory_status", "availability", "status")
+    active = first_value(source, "active")
+    regular_stock = first_value(source, "regular_stock")
+    inventory_status_value = first_string(source, "inventory_status", "availability", "status")
+    inventory_status = normalize_inventory_status(inventory_status_value)
+    if inventory_status == "unknown" and active is True:
+        inventory_status = "in_stock" if regular_stock is not False else "special_order"
+    elif inventory_status == "in_stock" and regular_stock is False:
+        inventory_status = "special_order"
+
+    discontinued = bool(
+        first_value(source, "discontinued", "is_discontinued")
+        or active is False
+        or inventory_status == "discontinued"
     )
-    discontinued = bool(first_value(raw, "discontinued", "is_discontinued") or inventory_status == "discontinued")
 
     product = {
         "turn14_id": turn14_id,
         "part_number": part_number,
+        "manufacturer_part_number": first_string(source, "mfr_part_number", "manufacturer_part_number"),
+        "alternate_part_number": first_string(source, "alternate_part_number"),
+        "barcode": first_string(source, "barcode"),
         "name": name,
         "slug": slug,
-        "short_description": first_string(raw, "short_description", "shortDescription", "summary"),
-        "description": first_string(raw, "description", "long_description", "longDescription"),
-        "primary_image_url": first_string(raw, "primary_image_url", "image", "image_url", "images.0.url"),
-        "price": decimal_string(first_value(raw, "price", "pricing.price", "jobber_price")),
-        "map_price": decimal_string(first_value(raw, "map_price", "pricing.map", "pricing.map_price")),
-        "msrp": decimal_string(first_value(raw, "msrp", "pricing.msrp", "retail_price")),
+        "short_description": first_string(source, "short_description", "shortDescription", "summary", "part_description"),
+        "description": first_string(source, "description", "long_description", "longDescription", "part_description"),
+        "turn14_category": first_string(source, "category.name", "category", "product_category", "categories.0.name"),
+        "turn14_subcategory": first_string(source, "subcategory.name", "subcategory"),
+        "primary_image_url": prefer_large_turn14_image(
+            first_string(
+                source,
+                "primary_image_url",
+                "thumbnail",
+                "image",
+                "image_url",
+                "images.0.url",
+            )
+        ),
+        "price": decimal_string(first_value(source, "price", "pricing.price", "jobber_price")),
+        "map_price": decimal_string(first_value(source, "map_price", "pricing.map", "pricing.map_price")),
+        "msrp": decimal_string(first_value(source, "msrp", "pricing.msrp", "retail_price")),
+        "price_group_id": first_value(source, "price_group_id"),
+        "price_group": first_string(source, "price_group"),
         "inventory_status": inventory_status,
         "active": not discontinued,
         "discontinued": discontinued,
+        "born_on_date": first_string(source, "born_on_date"),
+        "regular_stock": regular_stock,
+        "powersports_indicator": first_value(source, "powersports_indicator"),
+        "dropship_controller_id": first_value(source, "dropship_controller_id"),
+        "air_freight_prohibited": first_value(source, "air_freight_prohibited"),
+        "not_carb_approved": first_value(source, "not_carb_approved"),
+        "carb_acknowledgement_required": first_value(source, "carb_acknowledgement_required"),
+        "carb_eo_number": first_string(source, "carb_eo_number"),
+        "ltl_freight_required": first_value(source, "ltl_freight_required"),
+        "prop_65": first_string(source, "prop_65"),
+        "epa": first_string(source, "epa"),
+        "units_per_sku": first_value(source, "units_per_sku"),
+        "clearance_item": first_value(source, "clearance_item"),
+        "dimensions": first_value(source, "dimensions") or [],
+        "warehouse_availability": first_value(source, "warehouse_availability") or [],
+        "contents": first_value(source, "contents") or [],
         "raw_turn14_json": raw,
-        "turn14_updated_at": first_string(raw, "updated_at", "modified_at", "last_modified"),
+        "turn14_updated_at": first_string(source, "updated_at", "modified_at", "last_modified"),
     }
 
     brand = None
     if brand_name:
-        brand_turn14_id = first_string(raw, "brand.id", "brand_id", "manufacturer.id")
+        brand_turn14_id = first_string(source, "brand.id", "brand_id", "manufacturer.id")
         brand = {
             "turn14_id": brand_turn14_id,
             "name": brand_name,
             "slug": slugify(brand_name),
-            "logo_url": first_string(raw, "brand.logo_url", "brand.logo", "manufacturer.logo_url"),
-            "website_url": first_string(raw, "brand.website_url", "manufacturer.website_url"),
+            "logo_url": first_string(source, "brand.logo_url", "brand.logo", "manufacturer.logo_url"),
+            "website_url": first_string(source, "brand.website_url", "manufacturer.website_url"),
         }
 
-    category_name = first_string(raw, "category.name", "category", "product_category", "categories.0.name")
+    category_name = first_string(source, "category.name", "category", "product_category", "categories.0.name")
     category = None
     if category_name:
         category = {
@@ -547,7 +605,7 @@ def normalize_product(raw: dict[str, Any]) -> dict[str, Any]:
         "brand": remove_none_values(brand) if brand else None,
         "category": remove_none_values(category) if category else None,
         "product": remove_none_values(product),
-        "fitments": normalize_fitments(raw),
+        "fitments": normalize_fitments(source),
     }
 
 
@@ -751,6 +809,12 @@ def normalize_inventory_status(value: str | None) -> str:
     return aliases.get(normalized, normalized if normalized in INVENTORY_STATUSES else "unknown")
 
 
+def prefer_large_turn14_image(url: str | None) -> str | None:
+    if not url:
+        return None
+    return re.sub(r"S(\.(?:jpe?g|png|webp))$", r"L\1", url, flags=re.IGNORECASE)
+
+
 def make_uniqueish_slug(parts: list[str | None]) -> str:
     slug_parts = [slugify(part) for part in parts if part]
     slug = "-".join(part for part in slug_parts if part)
@@ -778,15 +842,15 @@ def load_config(state_file: str | None) -> Config:
     return Config(
         supabase_url=required("SUPABASE_URL"),
         supabase_service_role_key=required("SUPABASE_SERVICE_ROLE_KEY"),
-        turn14_api_base_url=required("TURN14_API_BASE_URL"),
-        turn14_products_path=os.getenv("TURN14_PRODUCTS_PATH", "/products"),
+        turn14_api_base_url=os.getenv("TURN14_API_BASE_URL", "https://api.turn14.com/v1"),
+        turn14_products_path=os.getenv("TURN14_PRODUCTS_PATH", "/items"),
         turn14_page_param=os.getenv("TURN14_PAGE_PARAM", "page"),
         turn14_page_size_param=os.getenv("TURN14_PAGE_SIZE_PARAM", "per_page"),
         turn14_page_size=int(os.getenv("TURN14_PAGE_SIZE", "100")),
         turn14_products_data_path=os.getenv("TURN14_PRODUCTS_DATA_PATH", "data"),
         turn14_products_next_path=os.getenv("TURN14_PRODUCTS_NEXT_PATH", "links.next"),
         turn14_access_token=os.getenv("TURN14_ACCESS_TOKEN"),
-        turn14_auth_url=os.getenv("TURN14_AUTH_URL"),
+        turn14_auth_url=os.getenv("TURN14_AUTH_URL", "https://api.turn14.com/v1/token"),
         turn14_client_id=os.getenv("TURN14_CLIENT_ID"),
         turn14_client_secret=os.getenv("TURN14_CLIENT_SECRET"),
         timeout_seconds=int(os.getenv("TURN14_TIMEOUT_SECONDS", "30")),
