@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  getSupabaseServerClient,
+  getSupabaseUrlDiagnostics,
+} from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -11,9 +14,13 @@ export async function GET() {
     SUPABASE_SERVICE_ROLE_KEY: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
     NEXT_PUBLIC_SUPABASE_ANON_KEY: Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
   };
+  const supabaseUrl = getSupabaseUrlDiagnostics();
 
   if (!supabase) {
-    return NextResponse.json({ env, error: "Supabase client is not configured." }, { status: 500 });
+    return NextResponse.json(
+      { env, supabaseUrl, error: "Supabase client is not configured." },
+      { status: 500 },
+    );
   }
 
   const { count, error } = await supabase
@@ -30,6 +37,7 @@ export async function GET() {
 
   return NextResponse.json({
     env,
+    supabaseUrl,
     activeProductCount: count,
     error: error?.message ?? null,
     sampleError: sampleError?.message ?? null,
