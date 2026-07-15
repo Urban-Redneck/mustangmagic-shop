@@ -73,7 +73,9 @@ function getStripeWebhookSecret() {
     process.env.STRIPE_WEBHOOK_SECRET,
     process.env.STRIPE_Webhook_Secret,
     process.env.STRIPE_WEBHOOK_SIGNING_SECRET,
-  ].filter(Boolean);
+  ]
+    .filter(Boolean)
+    .map((secret) => secret?.trim());
 
   return candidates.find((secret) => secret?.startsWith("whsec_")) ?? null;
 }
