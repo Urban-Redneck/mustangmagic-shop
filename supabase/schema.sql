@@ -433,6 +433,42 @@ create table public.store_order_items (
   constraint store_order_items_raw_stripe_line_item_object check (jsonb_typeof(raw_stripe_line_item) = 'object')
 );
 
+create table public.store_order_shipments (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid references public.store_orders(id) on delete set null,
+  tracking_number text not null,
+  turn14_tracking_id text,
+  turn14_package_detail_id text,
+  turn14_order_id text,
+  website_order_number text,
+  purchase_order_number text,
+  invoice_id text,
+  shipping_id integer,
+  carrier_name text,
+  service text,
+  location text,
+  ship_date date,
+  items jsonb not null default '[]'::jsonb,
+  raw_turn14_package_detail jsonb not null,
+  tracking_email_status text not null default 'pending',
+  tracking_email_result jsonb,
+  tracking_email_sent_at timestamptz,
+  first_seen_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  constraint store_order_shipments_tracking_number_unique unique (tracking_number),
+  constraint store_order_shipments_tracking_number_not_blank check (length(btrim(tracking_number)) > 0),
+  constraint store_order_shipments_items_array check (jsonb_typeof(items) = 'array'),
+  constraint store_order_shipments_raw_object check (jsonb_typeof(raw_turn14_package_detail) = 'object'),
+  constraint store_order_shipments_tracking_email_status_valid check (
+    tracking_email_status in ('pending', 'sent', 'skipped', 'failed')
+  ),
+  constraint store_order_shipments_tracking_email_result_object check (
+    tracking_email_result is null or jsonb_typeof(tracking_email_result) = 'object'
+  )
+);
+
 create table public.marketing_contacts (
   id uuid primary key default gen_random_uuid(),
   email text not null,
@@ -533,6 +569,10 @@ for each row execute function public.set_updated_at();
 
 create trigger store_order_items_set_updated_at
 before update on public.store_order_items
+for each row execute function public.set_updated_at();
+
+create trigger store_order_shipments_set_updated_at
+before update on public.store_order_shipments
 for each row execute function public.set_updated_at();
 
 create trigger marketing_contacts_set_updated_at
@@ -711,6 +751,17 @@ where turn14_id is not null;
 create index store_order_items_part_number_idx
 on public.store_order_items (part_number)
 where part_number is not null;
+create index store_order_shipments_order_id_idx
+on public.store_order_shipments (order_id)
+where order_id is not null;
+create index store_order_shipments_purchase_order_number_idx
+on public.store_order_shipments (purchase_order_number)
+where purchase_order_number is not null;
+create index store_order_shipments_turn14_order_id_idx
+on public.store_order_shipments (turn14_order_id)
+where turn14_order_id is not null;
+create index store_order_shipments_tracking_email_status_idx
+on public.store_order_shipments (tracking_email_status);
 create index marketing_contacts_consent_status_idx
 on public.marketing_contacts (consent_status);
 create index marketing_contacts_last_order_id_idx
@@ -735,6 +786,7 @@ grant select, insert, update, delete on table public.sync_runs to service_role;
 grant select, insert, update, delete on table public.checkout_intents to service_role;
 grant select, insert, update, delete on table public.store_orders to service_role;
 grant select, insert, update, delete on table public.store_order_items to service_role;
+grant select, insert, update, delete on table public.store_order_shipments to service_role;
 grant select, insert, update, delete on table public.marketing_contacts to service_role;
 grant select, insert, update, delete on table public.stripe_webhook_events to service_role;
 

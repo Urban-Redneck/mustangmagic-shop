@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/turn14-tracking",
+      "schedule": "0 */6 * * *"
+    }
+  ]
+}

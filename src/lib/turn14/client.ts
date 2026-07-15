@@ -50,6 +50,19 @@ export type Turn14OrderResult = {
   response: Record<string, unknown>;
 };
 
+export type Turn14TrackingPackageDetail = {
+  id: number | null;
+  tracking_id: number | null;
+  tracking_number: string;
+  shipping_id: number | null;
+  carrier_name: string | null;
+  service: string | null;
+  location: string | null;
+  ship_date: string | null;
+  items: Array<Record<string, unknown>>;
+  raw: Record<string, unknown>;
+};
+
 export function getTurn14Config(): Turn14Config | null {
   const clientId = process.env.TURN14_CLIENT_ID;
   const clientSecret = process.env.TURN14_CLIENT_SECRET;
@@ -217,6 +230,51 @@ export async function createTurn14OrderFromQuote({
   };
 }
 
+export async function getTurn14PackageDetails({
+  startDate,
+  endDate,
+}: {
+  startDate: string;
+  endDate: string;
+}): Promise<Turn14TrackingPackageDetail[]> {
+  const config = requiredConfig();
+  const token = await getAccessToken(config);
+  const response = await turn14Get(
+    config,
+    token,
+    `/tracking/package_details?start_date=${encodeURIComponent(
+      startDate,
+    )}&end_date=${encodeURIComponent(endDate)}`,
+  );
+
+  return arrayValue(response.data).flatMap((entry) => {
+    const record = objectValue(entry);
+    const attributes = objectValue(record?.attributes);
+    const trackingNumber = stringValue(attributes?.tracking_number);
+    if (!record || !attributes || !trackingNumber) {
+      return [];
+    }
+
+    return [
+      {
+        id: numberValue(record.id),
+        tracking_id: numberValue(attributes.tracking_id),
+        tracking_number: trackingNumber,
+        shipping_id: numberValue(attributes.shipping_id),
+        carrier_name: stringValue(attributes.carrier_name),
+        service: stringValue(attributes.service),
+        location: stringValue(attributes.location),
+        ship_date: stringValue(attributes.ship_date),
+        items: arrayValue(attributes.items).flatMap((item) => {
+          const itemRecord = objectValue(item);
+          return itemRecord ? [itemRecord] : [];
+        }),
+        raw: record,
+      },
+    ];
+  });
+}
+
 function describeUrl(value: string | null | undefined) {
   if (!value) {
     return null;
@@ -294,6 +352,27 @@ async function turn14Request(
       Accept: "application/json",
     },
     body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  const payload = (await response.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
+  if (!response.ok || !payload) {
+    throw new Error(
+      `Turn14 ${path} failed: ${response.status} ${JSON.stringify(payload)}`,
+    );
+  }
+  return payload;
+}
+
+async function turn14Get(config: Turn14Config, token: string, path: string) {
+  const response = await fetch(`${config.apiBaseUrl}${path}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
     cache: "no-store",
   });
   const payload = (await response.json().catch(() => null)) as Record<
