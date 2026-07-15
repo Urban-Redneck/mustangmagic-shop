@@ -74,6 +74,7 @@ export async function POST(request: NextRequest) {
   if (!acknowledgeCompliance) {
     return checkoutError(request, "Required order acknowledgements are missing.", 400);
   }
+  const marketingOptIn = stringValue(formData.get("marketing_opt_in")) === "true";
 
   const products = await getCheckoutProductsByIds(
     cartItems.map((item) => item.productId),
@@ -136,6 +137,8 @@ export async function POST(request: NextRequest) {
       metadata: {
         po_number: poNumber,
         cart_product_ids: cartItems.map((item) => item.productId).join(","),
+        marketing_opt_in: marketingOptIn,
+        marketing_opt_in_source: "checkout",
       },
     })
     .select("id")
@@ -173,6 +176,8 @@ export async function POST(request: NextRequest) {
         metadata: {
           po_number: poNumber,
           cart_product_ids: cartItems.map((item) => item.productId).join(","),
+          marketing_opt_in: marketingOptIn,
+          marketing_opt_in_source: "checkout",
           turn14_quote_error:
             error instanceof Error ? error.message : "Unknown Turn14 quote error.",
         },

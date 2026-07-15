@@ -179,6 +179,11 @@ export async function recordPaidCheckoutSession(
     orderPayload,
     items,
   });
+  await upsertMarketingContactIfConsented({
+    supabase,
+    orderId: order.id,
+    orderPayload,
+  });
 
   return order.id;
 }
@@ -485,6 +490,52 @@ async function sendAndRecordOrderConfirmation({
       },
     })
     .eq("id", orderId);
+}
+
+async function upsertMarketingContactIfConsented({
+  supabase,
+  orderId,
+  orderPayload,
+}: {
+  supabase: NonNullable<ReturnType<typeof getSupabaseServerClient>>;
+  orderId: string;
+  orderPayload: {
+    stripe_customer_id: string | null;
+    customer_email: string | null;
+    customer_name: string | null;
+    customer_phone: string | null;
+    stripe_checkout_session_id: string;
+    metadata: Record<string, unknown>;
+  };
+}) {
+  if (orderPayload.metadata.marketing_opt_in !== true) {
+    return;
+  }
+
+  const email = orderPayload.customer_email?.trim().toLowerCase();
+  if (!email) {
+    return;
+  }
+
+  await supabase.from("marketing_contacts").upsert(
+    {
+      email,
+      name: orderPayload.customer_name,
+      phone: orderPayload.customer_phone,
+      source: stringValue(orderPayload.metadata.marketing_opt_in_source) ?? "checkout",
+      consent_status: "subscribed",
+      consented_at: new Date().toISOString(),
+      unsubscribed_at: null,
+      last_order_id: orderId,
+      stripe_customer_id: orderPayload.stripe_customer_id,
+      metadata: {
+        last_stripe_checkout_session_id: orderPayload.stripe_checkout_session_id,
+      },
+    },
+    {
+      onConflict: "email",
+    },
+  );
 }
 
 function stringValue(value: unknown) {

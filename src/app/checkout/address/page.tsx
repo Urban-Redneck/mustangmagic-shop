@@ -144,6 +144,19 @@ export default async function CheckoutAddressPage({
                 </label>
               </section>
 
+              <section className="border border-zinc-200 bg-white p-5">
+                <label className="flex items-start gap-3 text-sm font-bold leading-6 text-zinc-700">
+                  <input
+                    type="checkbox"
+                    name="marketing_opt_in"
+                    value="true"
+                    className="mt-1 h-4 w-4 shrink-0 accent-red-700"
+                  />
+                  Email me Mustang Magic product updates, specials, and event
+                  news. I can unsubscribe at any time.
+                </label>
+              </section>
+
               <button
                 type="submit"
                 className="rounded bg-red-700 px-5 py-3 text-sm font-black uppercase tracking-wide text-white hover:bg-red-800"

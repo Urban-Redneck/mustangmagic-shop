@@ -433,6 +433,30 @@ create table public.store_order_items (
   constraint store_order_items_raw_stripe_line_item_object check (jsonb_typeof(raw_stripe_line_item) = 'object')
 );
 
+create table public.marketing_contacts (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  name text,
+  phone text,
+  source text not null default 'checkout',
+  consent_status text not null default 'subscribed',
+  consented_at timestamptz not null default now(),
+  unsubscribed_at timestamptz,
+  last_order_id uuid references public.store_orders(id) on delete set null,
+  stripe_customer_id text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  constraint marketing_contacts_email_unique unique (email),
+  constraint marketing_contacts_email_not_blank check (length(btrim(email)) > 0),
+  constraint marketing_contacts_source_not_blank check (length(btrim(source)) > 0),
+  constraint marketing_contacts_consent_status_valid check (
+    consent_status in ('subscribed', 'unsubscribed')
+  ),
+  constraint marketing_contacts_metadata_object check (jsonb_typeof(metadata) = 'object')
+);
+
 create table public.stripe_webhook_events (
   id uuid primary key default gen_random_uuid(),
   stripe_event_id text not null,
@@ -509,6 +533,10 @@ for each row execute function public.set_updated_at();
 
 create trigger store_order_items_set_updated_at
 before update on public.store_order_items
+for each row execute function public.set_updated_at();
+
+create trigger marketing_contacts_set_updated_at
+before update on public.marketing_contacts
 for each row execute function public.set_updated_at();
 
 create trigger stripe_webhook_events_set_updated_at
@@ -683,6 +711,11 @@ where turn14_id is not null;
 create index store_order_items_part_number_idx
 on public.store_order_items (part_number)
 where part_number is not null;
+create index marketing_contacts_consent_status_idx
+on public.marketing_contacts (consent_status);
+create index marketing_contacts_last_order_id_idx
+on public.marketing_contacts (last_order_id)
+where last_order_id is not null;
 create index stripe_webhook_events_event_type_created_at_idx
 on public.stripe_webhook_events (event_type, created_at desc);
 create index stripe_webhook_events_processed_at_idx
@@ -702,6 +735,7 @@ grant select, insert, update, delete on table public.sync_runs to service_role;
 grant select, insert, update, delete on table public.checkout_intents to service_role;
 grant select, insert, update, delete on table public.store_orders to service_role;
 grant select, insert, update, delete on table public.store_order_items to service_role;
+grant select, insert, update, delete on table public.marketing_contacts to service_role;
 grant select, insert, update, delete on table public.stripe_webhook_events to service_role;
 
 commit;
