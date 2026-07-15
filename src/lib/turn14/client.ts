@@ -78,6 +78,53 @@ export function getTurn14Config(): Turn14Config | null {
   };
 }
 
+export function getTurn14Diagnostics() {
+  const config = getTurn14Config();
+
+  return {
+    env: {
+      TURN14_CLIENT_ID: Boolean(process.env.TURN14_CLIENT_ID),
+      TURN14_CLIENT_SECRET: Boolean(process.env.TURN14_CLIENT_SECRET),
+      TURN14_API_BASE_URL: Boolean(process.env.TURN14_API_BASE_URL),
+      TURN14_AUTH_URL: Boolean(process.env.TURN14_AUTH_URL),
+      TURN14_ORDER_ENVIRONMENT: Boolean(process.env.TURN14_ORDER_ENVIRONMENT),
+      TURN14_ENVIRONMENT: Boolean(process.env.TURN14_ENVIRONMENT),
+    },
+    configured: Boolean(config),
+    environment: config?.environment ?? null,
+    apiBaseUrl: describeUrl(config?.apiBaseUrl),
+    authUrl: describeUrl(config?.authUrl),
+  };
+}
+
+export async function testTurn14TokenRequest() {
+  const config = getTurn14Config();
+  if (!config) {
+    return {
+      ok: false,
+      status: null,
+      error: "Turn14 credentials are not configured.",
+    };
+  }
+
+  try {
+    await getAccessToken(config);
+    return {
+      ok: true,
+      status: 200,
+      error: null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown Turn14 error.";
+    const statusMatch = message.match(/Turn14 token request failed: (\d+)/);
+    return {
+      ok: false,
+      status: statusMatch ? Number(statusMatch[1]) : null,
+      error: message.replace(/"access_token"\s*:\s*"[^"]+"/g, '"access_token":"[redacted]"'),
+    };
+  }
+}
+
 export async function createTurn14Quote({
   poNumber,
   items,
@@ -168,6 +215,35 @@ export async function createTurn14OrderFromQuote({
     orderId: numericPath(response, ["data", "id"]),
     response,
   };
+}
+
+function describeUrl(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    return {
+      protocol: url.protocol,
+      hostname: url.hostname,
+      pathname: url.pathname,
+      hasSearch: url.search.length > 0,
+      hasHash: url.hash.length > 0,
+      hasWhitespace: /\s/.test(value),
+      valid: true,
+    };
+  } catch {
+    return {
+      protocol: null,
+      hostname: null,
+      pathname: null,
+      hasSearch: false,
+      hasHash: false,
+      hasWhitespace: /\s/.test(value),
+      valid: false,
+    };
+  }
 }
 
 function requiredConfig() {
