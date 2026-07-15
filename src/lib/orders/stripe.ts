@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { sendOrderConfirmationEmail } from "@/lib/email/order-confirmation";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import {
   createTurn14OrderFromQuote,
@@ -171,6 +172,13 @@ export async function recordPaidCheckoutSession(
       });
     }
   }
+
+  await sendAndRecordOrderConfirmation({
+    supabase,
+    orderId: order.id,
+    orderPayload,
+    items,
+  });
 
   return order.id;
 }
@@ -404,8 +412,89 @@ async function markTurn14OrderFailure({
     .eq("id", storeOrderId);
 }
 
+async function sendAndRecordOrderConfirmation({
+  supabase,
+  orderId,
+  orderPayload,
+  items,
+}: {
+  supabase: NonNullable<ReturnType<typeof getSupabaseServerClient>>;
+  orderId: string;
+  orderPayload: {
+    stripe_checkout_session_id: string;
+    turn14_order_id: string | null;
+    fulfillment_status: string;
+    amount_total: number;
+    currency: string;
+    customer_email: string | null;
+    customer_name: string | null;
+    shipping_address: Record<string, unknown> | Stripe.Address | null;
+    metadata: Record<string, unknown>;
+  };
+  items: Array<{
+    part_number: string | null;
+    product_name: string;
+    quantity: number;
+    amount_total: number;
+    currency: string;
+  }>;
+}) {
+  const { data: orderRecord } = await supabase
+    .from("store_orders")
+    .select("metadata, turn14_order_id, fulfillment_status")
+    .eq("id", orderId)
+    .maybeSingle<{
+      metadata: Record<string, unknown> | null;
+      turn14_order_id: string | null;
+      fulfillment_status: string;
+    }>();
+
+  const metadata = orderRecord?.metadata ?? orderPayload.metadata;
+  if (objectValue(metadata.order_confirmation_email)?.status === "sent") {
+    return;
+  }
+
+  const result = await sendOrderConfirmationEmail({
+    to: orderPayload.customer_email,
+    customerName: orderPayload.customer_name,
+    orderNumber:
+      stringValue(metadata.po_number) ??
+      `MM-${orderPayload.stripe_checkout_session_id.slice(-8).toUpperCase()}`,
+    stripeSessionId: orderPayload.stripe_checkout_session_id,
+    turn14OrderId: orderRecord?.turn14_order_id ?? orderPayload.turn14_order_id,
+    fulfillmentStatus:
+      orderRecord?.fulfillment_status ?? orderPayload.fulfillment_status,
+    amountTotal: orderPayload.amount_total,
+    currency: orderPayload.currency,
+    shippingAddress: orderPayload.shipping_address,
+    items: items.map((item) => ({
+      partNumber: item.part_number,
+      productName: item.product_name,
+      quantity: item.quantity,
+      amountTotal: item.amount_total,
+      currency: item.currency,
+    })),
+  });
+
+  await supabase
+    .from("store_orders")
+    .update({
+      metadata: {
+        ...metadata,
+        order_confirmation_email: result,
+      },
+    })
+    .eq("id", orderId);
+}
+
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function objectValue(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function isUuid(value: string) {
