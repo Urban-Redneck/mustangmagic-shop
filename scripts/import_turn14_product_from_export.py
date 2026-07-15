@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,31 @@ def main() -> int:
         action="store_true",
         help="Set storefront_visible=true for imported products.",
     )
+    parser.add_argument(
+        "--pricing",
+        action="store_true",
+        help="After import, sync Turn14 pricing for the imported products.",
+    )
+    parser.add_argument(
+        "--inventory",
+        action="store_true",
+        help="After import, sync actual Turn14 warehouse inventory for the imported products.",
+    )
+    parser.add_argument(
+        "--item-data",
+        action="store_true",
+        help="After import, sync Turn14 item data, descriptions, and product images.",
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Run the normal add-part pipeline: import, publish, pricing, inventory, and item data.",
+    )
+    parser.add_argument(
+        "--legacy-inventory-columns-only",
+        action="store_true",
+        help="Pass --legacy-columns-only to inventory sync for databases without newer inventory columns.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Normalize without writing.")
     args = parser.parse_args()
 
@@ -38,6 +64,8 @@ def main() -> int:
         load_dotenv(Path(__file__).resolve().parents[1] / ".env")
         load_dotenv(Path(__file__).resolve().parents[1] / ".env.local")
 
+        root_dir = Path(__file__).resolve().parents[1]
+        publish = args.publish or args.full
         requested = {identifier.lower() for identifier in args.identifiers}
         export_path = Path(args.input)
         raw_items = json.loads(export_path.read_text(encoding="utf-8"))
@@ -55,7 +83,7 @@ def main() -> int:
         for item in matches:
             normalized = sync_turn14.normalize_product(item)
             product = normalized["product"]
-            product["storefront_visible"] = bool(args.publish)
+            product["storefront_visible"] = bool(publish)
             products.append(product)
 
         if args.dry_run:
@@ -69,9 +97,14 @@ def main() -> int:
             dry_run=False,
         )
 
-        if args.publish:
+        if publish:
             for product in products:
                 publish_product(supabase, str(product["turn14_id"]))
+
+        turn14_ids = [str(product["turn14_id"]) for product in products]
+        pipeline = run_followup_pipeline(args, root_dir, turn14_ids)
+        if pipeline:
+            summary["followup_pipeline"] = pipeline
 
         print(json.dumps(summary, indent=2, sort_keys=True))
         return 0 if summary["records_failed"] == 0 else 1
@@ -126,6 +159,79 @@ def publish_product(supabase: sync_turn14.SupabaseClient, turn14_id: str) -> Non
         headers,
         {"storefront_visible": True, "active": True},
     )
+
+
+def run_followup_pipeline(
+    args: argparse.Namespace,
+    root_dir: Path,
+    turn14_ids: list[str],
+) -> list[dict[str, Any]]:
+    if not turn14_ids:
+        return []
+
+    sync_pricing = args.full or args.pricing
+    sync_inventory = args.full or args.inventory
+    sync_item_data = args.full or args.item_data
+    if not (sync_pricing or sync_inventory or sync_item_data):
+        return []
+
+    joined_ids = ",".join(turn14_ids)
+    results: list[dict[str, Any]] = []
+    commands: list[tuple[str, list[str]]] = []
+    if sync_pricing:
+        commands.append(
+            (
+                "pricing",
+                [sys.executable, "scripts/sync_turn14_pricing.py", "--ids", joined_ids],
+            )
+        )
+    if sync_inventory:
+        command = [sys.executable, "scripts/sync_turn14_inventory.py", "--ids", joined_ids]
+        if args.legacy_inventory_columns_only:
+            command.append("--legacy-columns-only")
+        commands.append(("inventory", command))
+    if sync_item_data:
+        commands.append(
+            (
+                "item_data",
+                [sys.executable, "scripts/sync_turn14_item_data.py", "--ids", joined_ids],
+            )
+        )
+
+    for name, command in commands:
+        completed = subprocess.run(
+            command,
+            cwd=root_dir,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        results.append(
+            {
+                "name": name,
+                "command": " ".join(command),
+                "returncode": completed.returncode,
+                "stdout": parse_json_output(completed.stdout),
+                "stderr": completed.stderr.strip() or None,
+            }
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"{name} sync failed with exit code {completed.returncode}: "
+                f"{completed.stderr.strip() or completed.stdout.strip()}"
+            )
+
+    return results
+
+
+def parse_json_output(output: str) -> Any:
+    output = output.strip()
+    if not output:
+        return None
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError:
+        return output
 
 
 if __name__ == "__main__":

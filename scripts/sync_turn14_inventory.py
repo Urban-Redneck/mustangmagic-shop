@@ -347,7 +347,29 @@ def patch_product(config: dict[str, Any], turn14_id: str, update: dict[str, Any]
         update,
         prefer="return=minimal",
     )
-    request_json(config, request)
+    try:
+        request_json(config, request)
+    except RuntimeError as error:
+        if not is_missing_inventory_metadata_column(error):
+            raise
+        fallback_request = supabase_request(
+            config,
+            "PATCH",
+            f"products?turn14_id=eq.{urllib.parse.quote(turn14_id)}",
+            legacy_inventory_update(update),
+            prefer="return=minimal",
+        )
+        request_json(config, fallback_request)
+
+
+def is_missing_inventory_metadata_column(error: RuntimeError) -> bool:
+    message = str(error)
+    return (
+        "column products.inventory_quantity does not exist" in message
+        or "column products.inventory_updated_at does not exist" in message
+        or "column products.inventory_eta does not exist" in message
+        or "column products.raw_turn14_inventory_json does not exist" in message
+    )
 
 
 def create_sync_run(config: dict[str, Any]) -> str | None:
