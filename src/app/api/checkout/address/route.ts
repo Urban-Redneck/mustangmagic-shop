@@ -384,9 +384,13 @@ function checkoutError(request: NextRequest, message: string, status: number) {
 }
 
 function siteOrigin(request: NextRequest) {
-  return (
+  return sanitizeOrigin(
     process.env.NEXT_PUBLIC_SITE_URL ??
-    process.env.SITE_URL ??
-    request.nextUrl.origin
-  ).replace(/\/$/, "");
+      process.env.SITE_URL ??
+      request.nextUrl.origin,
+  );
+}
+
+function sanitizeOrigin(value: string) {
+  return value.trim().replace(/\/$/, "");
 }

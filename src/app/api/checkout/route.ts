@@ -169,5 +169,7 @@ function siteOrigin(request: NextRequest) {
     process.env.NEXT_PUBLIC_SITE_URL ??
     process.env.SITE_URL ??
     request.nextUrl.origin
-  ).replace(/\/$/, "");
+  )
+    .trim()
+    .replace(/\/$/, "");
 }
