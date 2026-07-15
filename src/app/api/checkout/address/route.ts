@@ -197,25 +197,48 @@ export async function POST(request: NextRequest) {
     ...buildChargeLineItems({ shippingAmount, feeAmount }),
   ];
 
-  const origin = siteOrigin(request);
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    client_reference_id: intent.id,
-    customer_email: contact.email,
-    line_items: checkoutLineItems,
-    metadata: {
-      checkout_intent_id: intent.id,
-      turn14_quote_id: String(turn14Quote.quoteId),
-      po_number: poNumber,
-      cart_product_ids: cartItems.map((item) => item.productId).join(","),
-    },
-    success_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin}/checkout/address?checkout=cancelled`,
-    billing_address_collection: "auto",
-    phone_number_collection: {
-      enabled: true,
-    },
-  });
+  let origin: string;
+  let session;
+  try {
+    origin = siteOrigin(request);
+    session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      client_reference_id: intent.id,
+      customer_email: contact.email,
+      line_items: checkoutLineItems,
+      metadata: {
+        checkout_intent_id: intent.id,
+        turn14_quote_id: String(turn14Quote.quoteId),
+        po_number: poNumber,
+        cart_product_ids: cartItems.map((item) => item.productId).join(","),
+      },
+      success_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/checkout/address?checkout=cancelled`,
+      billing_address_collection: "auto",
+      phone_number_collection: {
+        enabled: true,
+      },
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Could not create Stripe Checkout session.";
+    await supabase
+      .from("checkout_intents")
+      .update({
+        status: "failed",
+        metadata: {
+          po_number: poNumber,
+          cart_product_ids: cartItems.map((item) => item.productId).join(","),
+          marketing_opt_in: marketingOptIn,
+          marketing_opt_in_source: "checkout",
+          stripe_checkout_error: message,
+        },
+      })
+      .eq("id", intent.id);
+    return checkoutError(request, `Stripe checkout failed: ${message}`, 502);
+  }
 
   if (!session.url) {
     return checkoutError(request, "Stripe did not return a checkout URL.", 502);
