@@ -81,4 +81,5 @@ export type ProductFilters = {
   category?: string;
   generation?: string;
   limit?: number;
+  offset?: number;
 };
