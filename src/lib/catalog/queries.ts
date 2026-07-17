@@ -79,12 +79,14 @@ export async function getProductSlugs(limit = 200) {
     return [];
   }
 
-  const { data, error } = await supabase
+  const query = supabase
     .from("products")
     .select("slug")
     .eq("active", true)
+    .not("inventory_status", "in", "(special_order,unknown)")
     .order("name", { ascending: true })
     .limit(limit);
+  const { data, error } = await query;
 
   if (error || !data) {
     return [];
@@ -104,7 +106,8 @@ export async function getProducts(filters: ProductFilters = {}) {
     .select(
       "id, slug, part_number, name, short_description, primary_image_url, price, manual_price, inventory_status, can_purchase, brands(name)",
     )
-    .eq("active", true);
+    .eq("active", true)
+    .not("inventory_status", "in", "(special_order,unknown)");
 
   const searchQuery = normalizeSearchQuery(filters.query);
   if (searchQuery) {
@@ -150,9 +153,11 @@ export async function getProducts(filters: ProductFilters = {}) {
     query = query.in("id", ids);
   }
 
+  const limit = filters.limit ?? 24;
+  const offset = Math.max(filters.offset ?? 0, 0);
   const { data, error } = await query
     .order("name", { ascending: true })
-    .limit(filters.limit ?? 24)
+    .range(offset, offset + limit - 1)
     .returns<ProductRow[]>();
   if (error || !data) {
     return [];
@@ -165,6 +170,70 @@ export async function getProducts(filters: ProductFilters = {}) {
   return data.map((product) =>
     mapProductListItem(product, primaryImagesByProductId.get(product.id)),
   );
+}
+
+export async function getProductCount(filters: ProductFilters = {}) {
+  const supabase = getSupabaseServerClient();
+  if (!supabase) {
+    return 0;
+  }
+
+  let query = supabase
+    .from("products")
+    .select("id", { count: "exact", head: true })
+    .eq("active", true)
+    .not("inventory_status", "in", "(special_order,unknown)");
+
+  const searchQuery = normalizeSearchQuery(filters.query);
+  if (searchQuery) {
+    const brandIds = await getBrandIdsForSearch(searchQuery);
+    const searchPattern = `*${escapePostgrestPattern(searchQuery)}*`;
+    const searchClauses = [
+      `part_number.ilike.${searchPattern}`,
+      `manufacturer_part_number.ilike.${searchPattern}`,
+      `alternate_part_number.ilike.${searchPattern}`,
+      `barcode.ilike.${searchPattern}`,
+      `name.ilike.${searchPattern}`,
+      `short_description.ilike.${searchPattern}`,
+      `description.ilike.${searchPattern}`,
+      `slug.ilike.${searchPattern}`,
+    ];
+    if (brandIds.length > 0) {
+      searchClauses.push(`brand_id.in.(${brandIds.join(",")})`);
+    }
+    query = query.or(searchClauses.join(","));
+  }
+
+  if (filters.brand) {
+    const brand = await getBrandBySlug(filters.brand);
+    if (!brand) {
+      return 0;
+    }
+    query = query.eq("brand_id", brand.id);
+  }
+
+  if (filters.category) {
+    const ids = await getProductIdsForCategory(filters.category);
+    if (ids.length === 0) {
+      return 0;
+    }
+    query = query.in("id", ids);
+  }
+
+  if (filters.generation) {
+    const ids = await getProductIdsForGeneration(filters.generation);
+    if (ids.length === 0) {
+      return 0;
+    }
+    query = query.in("id", ids);
+  }
+
+  const { count, error } = await query;
+  if (error) {
+    return 0;
+  }
+
+  return count ?? 0;
 }
 
 export async function getProductBySlug(slug: string): Promise<ProductDetail | null> {
@@ -180,6 +249,7 @@ export async function getProductBySlug(slug: string): Promise<ProductDetail | nu
     )
     .eq("slug", slug)
     .eq("active", true)
+    .not("inventory_status", "in", "(special_order,unknown)")
     .maybeSingle<ProductRow>();
 
   if (error || !data) {
@@ -207,7 +277,7 @@ export async function getProductBySlug(slug: string): Promise<ProductDetail | nu
   };
 }
 
-export async function getBrands(limit = 100): Promise<Brand[]> {
+export async function getBrands(limit = 100, offset = 0): Promise<Brand[]> {
   const supabase = getSupabaseServerClient();
   if (!supabase) {
     return [];
@@ -217,7 +287,7 @@ export async function getBrands(limit = 100): Promise<Brand[]> {
     .from("brands")
     .select("id, name, slug, logo_url")
     .order("name", { ascending: true })
-    .limit(limit);
+    .range(Math.max(offset, 0), Math.max(offset, 0) + limit - 1);
 
   if (error || !data) {
     return [];
@@ -274,7 +344,7 @@ async function getBrandIdsForSearch(searchQuery: string) {
   return data.flatMap((brand) => (brand.id ? [brand.id] : []));
 }
 
-export async function getCategories(limit = 100): Promise<Category[]> {
+export async function getCategories(limit = 100, offset = 0): Promise<Category[]> {
   const supabase = getSupabaseServerClient();
   if (!supabase) {
     return [];
@@ -286,7 +356,7 @@ export async function getCategories(limit = 100): Promise<Category[]> {
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true })
-    .limit(limit);
+    .range(Math.max(offset, 0), Math.max(offset, 0) + limit - 1);
 
   if (error || !data) {
     return [];
