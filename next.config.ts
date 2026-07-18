@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "d5otzd52uv6zz.cloudfront.net",
       },
+      {
+        protocol: "https",
+        hostname: "bmrsuspension.com",
+      },
     ],
   },
 };
