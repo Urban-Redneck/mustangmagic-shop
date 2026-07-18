@@ -120,7 +120,15 @@ export default async function PartsPage({
               title="Generations"
               emptyText="Add Mustang generations in Supabase to enable generation filters."
               items={generations.map((generation) => ({
-                href: `/parts?generation=${generation.slug}`,
+                href: partsHref({
+                  brand: selectedBrand,
+                  category: selectedCategory,
+                  generation: generation.slug,
+                  query: searchQuery,
+                  page: 1,
+                  brandPage: requestedBrandPage,
+                  categoryPage: requestedCategoryPage,
+                }),
                 label: generationFilterLabel(generation),
                 active: selectedGeneration === generation.slug,
               }))}
@@ -129,7 +137,15 @@ export default async function PartsPage({
               title="Categories"
               emptyText="Add curated Mustang Magic categories in Supabase to enable category filters."
               items={visibleCategories.map((category) => ({
-                href: `/parts?category=${category.slug}`,
+                href: partsHref({
+                  brand: selectedBrand,
+                  category: category.slug,
+                  generation: selectedGeneration,
+                  query: searchQuery,
+                  page: 1,
+                  brandPage: requestedBrandPage,
+                  categoryPage: requestedCategoryPage,
+                }),
                 label: category.name,
                 active: selectedCategory === category.slug,
               }))}
@@ -149,7 +165,15 @@ export default async function PartsPage({
               title="Brands"
               emptyText="Brands will appear after Mustang products are imported."
               items={visibleBrands.map((brand) => ({
-                href: `/parts?brand=${brand.slug}`,
+                href: partsHref({
+                  brand: brand.slug,
+                  category: selectedCategory,
+                  generation: selectedGeneration,
+                  query: searchQuery,
+                  page: 1,
+                  brandPage: requestedBrandPage,
+                  categoryPage: requestedCategoryPage,
+                }),
                 label: brand.name,
                 active: selectedBrand === brand.slug,
               }))}
