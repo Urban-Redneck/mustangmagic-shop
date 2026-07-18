@@ -121,7 +121,7 @@ export default async function PartsPage({
               emptyText="Add Mustang generations in Supabase to enable generation filters."
               items={generations.map((generation) => ({
                 href: `/parts?generation=${generation.slug}`,
-                label: generation.name,
+                label: generationFilterLabel(generation),
                 active: selectedGeneration === generation.slug,
               }))}
             />
@@ -332,6 +332,22 @@ function firstParam(value: string | string[] | undefined) {
   }
   const trimmed = value?.trim();
   return trimmed || undefined;
+}
+
+function generationFilterLabel(generation: {
+  name: string;
+  startYear: number;
+  endYear: number | null;
+}) {
+  const startYear = shortYear(generation.startYear);
+  const endYear = generation.endYear
+    ? shortYear(generation.endYear)
+    : "and up";
+  return `${generation.name} ${startYear}-${endYear}`.replace("-and up", " and up");
+}
+
+function shortYear(year: number) {
+  return String(year).slice(-2);
 }
 
 function pageParam(value: string | string[] | undefined) {
