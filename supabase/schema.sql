@@ -224,6 +224,29 @@ create table public.product_categories (
   constraint product_categories_product_category_unique unique (product_id, category_id)
 );
 
+create table public.inventory_sources (
+  id bigint generated always as identity primary key,
+  product_id uuid not null references public.products(id) on delete cascade,
+  vendor_name text not null,
+  vendor_sku text not null,
+  cost_price numeric(12, 2),
+  stock_quantity integer,
+  updated_at timestamptz not null default now(),
+
+  constraint inventory_sources_vendor_name_supported
+  check (vendor_name in ('turn14', 'atech')),
+  constraint inventory_sources_vendor_sku_not_blank
+  check (length(btrim(vendor_sku)) > 0),
+  constraint inventory_sources_cost_price_non_negative
+  check (cost_price is null or cost_price >= 0),
+  constraint inventory_sources_stock_quantity_non_negative
+  check (stock_quantity is null or stock_quantity >= 0),
+  constraint inventory_sources_product_vendor_unique
+  unique (product_id, vendor_name),
+  constraint inventory_sources_vendor_sku_unique
+  unique (vendor_name, vendor_sku)
+);
+
 create table public.product_fitments (
   id uuid primary key default gen_random_uuid(),
   product_id uuid not null references public.products(id) on delete cascade,
@@ -547,6 +570,10 @@ create trigger product_categories_set_updated_at
 before update on public.product_categories
 for each row execute function public.set_updated_at();
 
+create trigger inventory_sources_set_updated_at
+before update on public.inventory_sources
+for each row execute function public.set_updated_at();
+
 create trigger product_fitments_set_updated_at
 before update on public.product_fitments
 for each row execute function public.set_updated_at();
@@ -628,6 +655,13 @@ where inventory_quantity is not null;
 create index products_inventory_updated_at_idx
 on public.products (inventory_updated_at)
 where inventory_updated_at is not null;
+create index inventory_sources_product_id_idx
+on public.inventory_sources (product_id);
+create index inventory_sources_vendor_name_idx
+on public.inventory_sources (vendor_name);
+create index inventory_sources_stock_quantity_idx
+on public.inventory_sources (stock_quantity)
+where stock_quantity is not null;
 create index products_price_idx on public.products (price);
 create index products_manual_price_idx
 on public.products (manual_price)
@@ -780,6 +814,7 @@ grant select, insert, update, delete on table public.mustang_generations to serv
 grant select, insert, update, delete on table public.turn14_items_exp to service_role;
 grant select, insert, update, delete on table public.products to service_role;
 grant select, insert, update, delete on table public.product_categories to service_role;
+grant select, insert, update, delete on table public.inventory_sources to service_role;
 grant select, insert, update, delete on table public.product_fitments to service_role;
 grant select, insert, update, delete on table public.product_images to service_role;
 grant select, insert, update, delete on table public.sync_runs to service_role;
@@ -788,6 +823,7 @@ grant select, insert, update, delete on table public.store_orders to service_rol
 grant select, insert, update, delete on table public.store_order_items to service_role;
 grant select, insert, update, delete on table public.store_order_shipments to service_role;
 grant select, insert, update, delete on table public.marketing_contacts to service_role;
+grant usage, select on sequence public.inventory_sources_id_seq to service_role;
 grant select, insert, update, delete on table public.stripe_webhook_events to service_role;
 
 commit;
