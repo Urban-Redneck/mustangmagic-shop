@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { CatalogLinks } from "@/components/catalog/catalog-links";
-import { PageHeading } from "@/components/catalog/page-heading";
 import { ProductGrid } from "@/components/catalog/product-grid";
 import { SearchForm } from "@/components/catalog/search-form";
 import {
@@ -103,18 +102,37 @@ export default async function PartsPage({
     });
 
   return (
-    <main className="bg-zinc-50">
-      <div className="mx-auto max-w-7xl px-5 py-12 lg:px-8">
-        <PageHeading
-          eyebrow="Parts"
-          title="Mustang performance catalog"
-          description="Filter the Mustang Magic catalog by fitment, brand, category, or search term."
-        />
-        <div className="mt-8">
-          <SearchForm action="/parts" defaultValue={searchQuery ?? ""} />
+    <main className="bg-zinc-100">
+      <section className="mm-carbon border-b border-zinc-900 text-white">
+        <div className="mx-auto max-w-7xl px-5 py-10 lg:px-8">
+          <div className="grid gap-8 lg:grid-cols-[1fr_22rem] lg:items-end">
+            <div>
+              <p className="text-sm font-black uppercase tracking-[0.22em] text-yellow-300">
+                Remote tune friendly - Dyno tested - Coyote specialists
+              </p>
+              <h1 className="mt-3 max-w-4xl text-4xl font-black tracking-tight text-white sm:text-5xl">
+                Mustang performance catalog
+              </h1>
+              <p className="mt-4 max-w-3xl border-l-4 border-red-700 pl-4 text-base font-medium leading-7 text-zinc-300 sm:text-lg">
+                Filter the Mustang Magic catalog by fitment, brand, category, or
+                search term.
+              </p>
+            </div>
+            <div className="rounded border border-white/10 bg-black/45 p-4">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-yellow-300">
+                Search the parts counter
+              </p>
+              <div className="mt-3">
+                <SearchForm action="/parts" defaultValue={searchQuery ?? ""} />
+              </div>
+            </div>
+          </div>
         </div>
+      </section>
 
-        <div className="mt-10 grid gap-8 lg:grid-cols-[18rem_1fr]">
+      <div className="mx-auto max-w-7xl px-5 py-10 lg:px-8">
+
+        <div className="grid gap-8 lg:grid-cols-[18rem_1fr]">
           <aside className="grid h-fit gap-6">
             <FilterGroup
               title="Generations"
@@ -194,7 +212,7 @@ export default async function PartsPage({
           <section>
             <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <p className="text-sm font-bold uppercase tracking-wide text-zinc-500">
+                <p className="text-sm font-black uppercase tracking-wide text-red-700">
                   {totalProducts === 0
                     ? "0 results"
                     : `${resultStart}-${resultEnd} of ${totalProducts} results`}
@@ -263,13 +281,13 @@ function FilterGroup({
   };
 }) {
   return (
-    <div className="rounded border border-zinc-200 bg-white p-4">
+    <div className="overflow-hidden rounded border border-zinc-200 bg-white">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-black uppercase tracking-[0.14em] text-zinc-950">
+        <h2 className="flex-1 bg-zinc-950 px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-yellow-300">
           {title}
         </h2>
         {controls ? (
-          <div className="flex items-center gap-1" aria-label={controls.label}>
+          <div className="flex items-center gap-1 bg-zinc-950 px-3 py-2" aria-label={controls.label}>
             <FilterPageLink
               href={controls.previousHref}
               disabled={!controls.hasPrevious}
@@ -288,15 +306,15 @@ function FilterGroup({
         ) : null}
       </div>
       {items.length > 0 ? (
-        <div className="mt-3 grid gap-1">
+        <div className="grid gap-1 p-3">
           {items.map((item) => (
             <a
               key={item.href}
               href={item.href}
               className={[
-                "rounded px-2 py-2 text-sm font-semibold hover:bg-zinc-100 hover:text-zinc-950",
+                "rounded px-2 py-2 text-sm font-bold hover:bg-zinc-100 hover:text-zinc-950",
                 item.active
-                  ? "bg-zinc-950 text-white hover:bg-zinc-800 hover:text-white"
+                  ? "bg-red-700 text-white hover:bg-red-800 hover:text-white"
                   : "text-zinc-600",
               ].join(" ")}
             >
@@ -305,7 +323,7 @@ function FilterGroup({
           ))}
         </div>
       ) : (
-        <p className="mt-3 text-sm leading-6 text-zinc-500">
+        <p className="p-4 text-sm leading-6 text-zinc-500">
           {emptyText}
         </p>
       )}
@@ -332,7 +350,7 @@ function FilterPageLink({
       <span
         aria-disabled="true"
         aria-label={label}
-        className={`${className} border-zinc-200 text-zinc-300`}
+        className={`${className} border-white/10 text-zinc-600`}
       >
         {children}
       </span>
@@ -343,7 +361,7 @@ function FilterPageLink({
     <a
       href={href}
       aria-label={label}
-      className={`${className} border-zinc-200 text-zinc-700 hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-950`}
+      className={`${className} border-white/20 text-yellow-300 hover:border-yellow-300 hover:bg-yellow-300 hover:text-zinc-950`}
     >
       {children}
     </a>
@@ -479,7 +497,7 @@ function CompactPagination({
   return (
     <nav
       aria-label="Catalog page controls"
-      className="flex items-center gap-2 rounded border border-zinc-200 bg-white p-1"
+      className="flex items-center gap-2 rounded border border-zinc-200 bg-white p-1 shadow-sm"
     >
       <PageLink
         href={pageHref(Math.max(currentPage - 1, 1))}
@@ -536,8 +554,8 @@ function PageLink({
         "rounded border text-sm font-bold uppercase tracking-wide",
         compact ? "px-2 py-1" : "px-3 py-2",
         active
-          ? "border-zinc-950 bg-zinc-950 text-white"
-          : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400 hover:text-zinc-950",
+          ? "border-red-700 bg-red-700 text-white"
+          : "border-zinc-200 bg-white text-zinc-700 hover:border-yellow-500 hover:text-zinc-950",
       ].join(" ")}
     >
       {children}
