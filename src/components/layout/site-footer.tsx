@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export function SiteFooter() {
   return (
     <footer className="border-t border-zinc-800 bg-zinc-950 text-zinc-300">
@@ -25,6 +27,19 @@ export function SiteFooter() {
           <p className="mt-2 text-zinc-400">
             Browse Mustang parts by generation, brand, category, or part number.
           </p>
+          <Link
+            className="mt-3 inline-block text-yellow-300 hover:text-yellow-200"
+            href="/terms"
+          >
+            Terms &amp; Returns
+          </Link>
+          <div className="mt-3 grid gap-1 text-xs text-zinc-400">
+            <Link className="hover:text-yellow-200" href="/contact">Contact</Link>
+            <Link className="hover:text-yellow-200" href="/ordering">How ordering works</Link>
+            <Link className="hover:text-yellow-200" href="/fitment">Fitment guide</Link>
+            <Link className="hover:text-yellow-200" href="/shipping">Shipping</Link>
+            <Link className="hover:text-yellow-200" href="/privacy">Privacy notice</Link>
+          </div>
         </div>
       </div>
     </footer>
