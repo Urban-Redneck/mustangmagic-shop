@@ -1,14 +1,30 @@
 import Link from "next/link";
 import { getCartItems } from "@/lib/cart/server";
 import { getCheckoutProductsByIds } from "@/lib/checkout/products";
+import {
+  discountedUnitAmountCents,
+  getAppliedDiscount,
+  type AppliedDiscount,
+} from "@/lib/discounts/server";
 
 export const metadata = {
-  title: "Cart | MustangMagic.store",
-  description: "Review selected Mustang parts before Stripe checkout.",
+  title: "Shopping Cart",
+  description: "Review selected Mustang parts before contacting the shop.",
 };
 
-export default async function CartPage() {
-  const cartItems = await getCartItems();
+type CartPageProps = {
+  searchParams: Promise<{
+    discount?: string;
+    discountError?: string;
+  }>;
+};
+
+export default async function CartPage({ searchParams }: CartPageProps) {
+  const [{ discount, discountError }, cartItems, appliedDiscount] = await Promise.all([
+    searchParams,
+    getCartItems(),
+    getAppliedDiscount(),
+  ]);
   const products = await getCheckoutProductsByIds(
     cartItems.map((item) => item.productId),
   );
@@ -24,6 +40,8 @@ export default async function CartPage() {
     (sum, row) => sum + (row.product?.price ?? 0) * row.item.quantity,
     0,
   );
+  const discountSummary = calculateCartDiscount(purchasableRows, appliedDiscount);
+  const estimatedTotal = discountSummary?.subtotalAfterDiscount ?? subtotal;
   const canCheckout = rows.length > 0 && purchasableRows.length === rows.length;
 
   return (
@@ -52,7 +70,8 @@ export default async function CartPage() {
               Your cart is empty
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-zinc-600">
-              Add priced catalog items to review them together before checkout.
+              Add priced catalog items to review them together before contacting
+              the shop.
             </p>
             <Link
               href="/parts"
@@ -101,7 +120,7 @@ export default async function CartPage() {
                           <p className="mt-3 text-sm text-zinc-600">
                             {product.canPurchase
                               ? `${formatPrice(product.price)} each`
-                              : "Not available for online checkout right now."}
+                              : "Call for current price and availability."}
                           </p>
                         </>
                       ) : (
@@ -182,29 +201,89 @@ export default async function CartPage() {
                     {formatPrice(subtotal)}
                   </span>
                 </div>
+                {discountSummary ? (
+                  <div className="flex justify-between gap-4 text-red-700">
+                    <span>
+                      Discount ({discountSummary.code}, {discountSummary.label})
+                    </span>
+                    <span className="font-black">
+                      -{formatPrice(discountSummary.amount)}
+                    </span>
+                  </div>
+                ) : null}
+                <div className="flex justify-between gap-4 border-t border-zinc-200 pt-3">
+                  <span className="font-bold text-zinc-700">
+                    Estimated before shipping
+                  </span>
+                  <span className="font-black text-zinc-950">
+                    {formatPrice(estimatedTotal)}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-5 border-b border-zinc-200 pb-5">
+                {appliedDiscount ? (
+                  <form action="/api/discount" method="post" className="grid gap-2">
+                    <input type="hidden" name="action" value="clear" />
+                    <input type="hidden" name="returnTo" value="/cart" />
+                    <p className="text-sm font-bold text-zinc-700">
+                      Code {appliedDiscount.code} is applied.
+                    </p>
+                    <button
+                      type="submit"
+                      className="rounded border border-zinc-300 px-3 py-2 text-xs font-black uppercase tracking-wide text-zinc-700 hover:border-zinc-950 hover:text-zinc-950"
+                    >
+                      Remove discount
+                    </button>
+                  </form>
+                ) : (
+                  <form action="/api/discount" method="post" className="grid gap-2">
+                    <input type="hidden" name="action" value="apply" />
+                    <input type="hidden" name="returnTo" value="/cart" />
+                    <label
+                      htmlFor="discountCode"
+                      className="text-sm font-bold text-zinc-700"
+                    >
+                      Discount code
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        id="discountCode"
+                        name="discountCode"
+                        placeholder="Code"
+                        className="min-h-10 min-w-0 flex-1 rounded border border-zinc-300 px-3 text-sm font-semibold uppercase text-zinc-950 outline-none focus:border-red-700"
+                      />
+                      <button
+                        type="submit"
+                        className="rounded bg-zinc-950 px-3 text-xs font-black uppercase tracking-wide text-white hover:bg-zinc-800"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </form>
+                )}
+                {discount === "applied" ? (
+                  <p className="text-sm font-bold text-green-700">
+                    Discount code applied.
+                  </p>
+                ) : null}
+                {discountError === "invalid" ? (
+                  <p className="text-sm font-bold text-red-700">
+                    That discount code is not valid.
+                  </p>
+                ) : null}
               </div>
               {!canCheckout ? (
                 <p className="mt-4 text-sm leading-6 text-zinc-600">
-                  Remove unavailable items before checkout. Prices and
+                  Remove unavailable items before requesting an order. Prices and
                   availability are checked again on the server.
                 </p>
               ) : null}
-              {canCheckout ? (
-                <Link
-                  href="/checkout/address"
-                  className="mt-5 flex w-full justify-center rounded bg-red-700 px-5 py-3 text-sm font-black uppercase tracking-wide text-white hover:bg-red-800"
-                >
-                  Checkout cart
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  disabled
-                  className="mt-5 w-full rounded bg-zinc-300 px-5 py-3 text-sm font-black uppercase tracking-wide text-white disabled:cursor-not-allowed"
-                >
-                  Checkout cart
-                </button>
-              )}
+              <a
+                href="tel:+16312543430"
+                className="mt-5 flex w-full justify-center rounded bg-red-700 px-5 py-3 text-sm font-black uppercase tracking-wide text-white hover:bg-red-800"
+              >
+                Call to order: (631) 254-3430
+              </a>
               <form action="/api/cart" method="post" className="mt-3">
                 <input type="hidden" name="action" value="clear" />
                 <input type="hidden" name="returnTo" value="/cart" />
@@ -228,4 +307,58 @@ function formatPrice(price: number) {
     style: "currency",
     currency: "USD",
   }).format(price);
+}
+
+function calculateCartDiscount(
+  rows: Array<{
+    item: { quantity: number };
+    product: {
+      price: number;
+      purchaseCost: number;
+    } | null;
+  }>,
+  appliedDiscount: AppliedDiscount | null,
+) {
+  if (!appliedDiscount) {
+    return null;
+  }
+
+  const subtotalCents = rows.reduce((sum, row) => {
+    if (!row.product) {
+      return sum;
+    }
+    return sum + dollarsToCents(row.product.price) * row.item.quantity;
+  }, 0);
+  const discountedSubtotalCents = rows.reduce((sum, row) => {
+    if (!row.product) {
+      return sum;
+    }
+    return (
+      sum +
+      discountedUnitAmountCents(
+        dollarsToCents(row.product.price),
+        appliedDiscount,
+        dollarsToCents(row.product.purchaseCost),
+      ) *
+        row.item.quantity
+    );
+  }, 0);
+  const discountAmountCents = Math.max(
+    subtotalCents - discountedSubtotalCents,
+    0,
+  );
+
+  if (discountAmountCents <= 0) {
+    return null;
+  }
+
+  return {
+    ...appliedDiscount,
+    amount: discountAmountCents / 100,
+    subtotalAfterDiscount: discountedSubtotalCents / 100,
+  };
+}
+
+function dollarsToCents(value: number) {
+  return Math.round(value * 100);
 }

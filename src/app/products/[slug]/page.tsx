@@ -26,15 +26,27 @@ export async function generateMetadata({
 
   if (!product) {
     return {
-      title: "Product Not Found | MustangMagic.store",
+      title: "Product Not Found",
     };
   }
 
   return {
-    title: `${product.name} | MustangMagic.store`,
+    title: product.name,
     description:
       product.shortDescription ??
       `${product.brandName ?? "Mustang"} part ${product.partNumber}`,
+    alternates: {
+      canonical: `/products/${product.slug}`,
+    },
+    openGraph: {
+      title: product.name,
+      description:
+        product.shortDescription ??
+        `${product.brandName ?? "Mustang"} part ${product.partNumber}`,
+      url: `/products/${product.slug}`,
+      type: "website",
+      images: product.primaryImageUrl ? [{ url: product.primaryImageUrl }] : undefined,
+    },
   };
 }
 
@@ -63,6 +75,37 @@ export default async function ProductPage({ params }: ProductPageProps) {
         : [];
   return (
     <main className="bg-zinc-50">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "Product",
+            name: product.name,
+            sku: product.partNumber,
+            description: product.description ?? product.shortDescription ?? undefined,
+            image: galleryImages.map((image) => image.url),
+            brand: product.brandName
+              ? { "@type": "Brand", name: product.brandName }
+              : undefined,
+            offers: product.price
+              ? {
+                  "@type": "Offer",
+                  url: `https://mustangmagic.store/products/${product.slug}`,
+                  priceCurrency: "USD",
+                  price: product.price.toFixed(2),
+                  availability: product.canPurchase
+                    ? "https://schema.org/InStock"
+                    : "https://schema.org/OutOfStock",
+                  seller: {
+                    "@type": "Organization",
+                    name: "Mustang Magic & American Speed",
+                  },
+                }
+              : undefined,
+          }),
+        }}
+      />
       <div className="mx-auto max-w-7xl px-5 py-10 lg:px-8">
         <Link
           href="/parts"
@@ -103,7 +146,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
               <h2 className="text-sm font-black uppercase tracking-[0.14em] text-zinc-950">
                 Purchase status
               </h2>
-              {canStartCheckout(
+              {canAddToCart(
                 product.price,
                 product.inventoryStatus,
                 product.canPurchase,
@@ -130,14 +173,13 @@ export default async function ProductPage({ params }: ProductPageProps) {
                     Add to cart
                   </button>
                   <p className="text-xs leading-5 text-zinc-500">
-                    Your cart stores only product IDs and quantities. Price and
-                    availability are revalidated on the server before Stripe
-                    checkout opens.
+                    Your cart stores only product IDs and quantities. Call the
+                    shop to confirm the current price and availability.
                   </p>
                 </form>
               ) : (
                 <p className="mt-3 text-sm leading-6 text-zinc-600">
-                  This product is not available for online checkout right now.
+                  This product is not available for online ordering right now.
                   Contact Mustang Magic for current price and availability.
                 </p>
               )}
@@ -305,7 +347,7 @@ function formatInventoryStatus(status: string) {
   return status.replaceAll("_", " ");
 }
 
-function canStartCheckout(
+function canAddToCart(
   price: number | null,
   inventoryStatus: string,
   canPurchase: boolean,
