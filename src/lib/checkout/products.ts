@@ -1,4 +1,5 @@
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { hasMinimumMargin } from "@/lib/pricing/margins";
 
 export type CheckoutProduct = {
   id: string;
@@ -9,6 +10,7 @@ export type CheckoutProduct = {
   shortDescription: string | null;
   primaryImageUrl: string | null;
   price: number;
+  purchaseCost: number;
   inventoryStatus: string;
   canPurchase: boolean;
 };
@@ -23,6 +25,7 @@ type CheckoutProductRow = {
   primary_image_url: string | null;
   price: number | string | null;
   manual_price: number | string | null;
+  purchase_cost: number | string | null;
   inventory_status: string;
   can_purchase: boolean | null;
 };
@@ -53,6 +56,7 @@ export async function getCheckoutProductById(
         "primary_image_url",
         "price",
         "manual_price",
+        "purchase_cost",
         "inventory_status",
         "can_purchase",
       ].join(", "),
@@ -66,13 +70,16 @@ export async function getCheckoutProductById(
   }
 
   const price = effectivePrice(data);
+  const purchaseCost = toNumber(data.purchase_cost);
   const canPurchase =
     data.can_purchase === true &&
     price !== null &&
     price > 0 &&
+    purchaseCost !== null &&
+    hasMinimumMargin(price, purchaseCost) &&
     PURCHASABLE_INVENTORY_STATUSES.has(data.inventory_status);
 
-  if (price === null) {
+  if (price === null || purchaseCost === null) {
     return null;
   }
 
@@ -85,6 +92,7 @@ export async function getCheckoutProductById(
     shortDescription: data.short_description,
     primaryImageUrl: data.primary_image_url,
     price,
+    purchaseCost,
     inventoryStatus: data.inventory_status,
     canPurchase,
   };
@@ -109,6 +117,7 @@ export async function getCheckoutProductsByIds(ids: string[]) {
         "primary_image_url",
         "price",
         "manual_price",
+        "purchase_cost",
         "inventory_status",
         "can_purchase",
       ].join(", "),
@@ -123,13 +132,15 @@ export async function getCheckoutProductsByIds(ids: string[]) {
 
   const products = data.flatMap((row) => {
     const price = effectivePrice(row);
-    if (price === null) {
+    const purchaseCost = toNumber(row.purchase_cost);
+    if (price === null || purchaseCost === null) {
       return [];
     }
 
     const canPurchase =
       row.can_purchase === true &&
       price > 0 &&
+      hasMinimumMargin(price, purchaseCost) &&
       PURCHASABLE_INVENTORY_STATUSES.has(row.inventory_status);
 
     return [
@@ -142,6 +153,7 @@ export async function getCheckoutProductsByIds(ids: string[]) {
         shortDescription: row.short_description,
         primaryImageUrl: row.primary_image_url,
         price,
+        purchaseCost,
         inventoryStatus: row.inventory_status,
         canPurchase,
       },
