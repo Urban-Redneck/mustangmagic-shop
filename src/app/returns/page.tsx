@@ -17,7 +17,10 @@ export default function ReturnsPage() {
         <p>
           Call (631) 254-3430 with your order or invoice information, part
           number, reason for the request, and photographs when relevant. Do not
-          ship a return without receiving instructions from the shop.
+          ship a return without receiving instructions from the shop. For a
+          non-defective return, Mustang Magic must receive your return request
+          by 11:59 p.m. Eastern Time on the 30th calendar day after delivery.
+          This deadline is firm.
         </p>
       </DraftSection>
       <DraftSection title="Things that may affect eligibility">
