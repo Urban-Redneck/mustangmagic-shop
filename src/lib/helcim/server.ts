@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 const DEFAULT_API_BASE_URL = "https://api.helcim.com/v2";
 const DEFAULT_CURRENCY = "USD";
 
-export type HelcimPaymentType = "purchase" | "preauthorize";
+export type HelcimPaymentType = "purchase" | "preauth" | "verify";
 
 export type HelcimPaySession = {
   checkoutToken: string;
@@ -34,7 +34,7 @@ export function getHelcimConfig(): HelcimConfig | null {
 
 export async function initializeHelcimPaySession({
   amountCents,
-  paymentType = "preauthorize",
+  paymentType = "preauth",
   invoiceNumber,
   customerCode,
 }: {
@@ -73,7 +73,9 @@ export async function initializeHelcimPaySession({
   > | null;
 
   if (!response.ok || !payload) {
-    throw new Error(`Helcim initialization failed: ${response.status}`);
+    const errorMessage =
+      payload && typeof payload.errors === "string" ? `: ${payload.errors}` : "";
+    throw new Error(`Helcim initialization failed: ${response.status}${errorMessage}`);
   }
 
   const checkoutToken = stringValue(payload.checkoutToken);
@@ -91,7 +93,7 @@ export function verifyHelcimWebhook({
   timestampHeader,
   webhookIdHeader,
   nowSeconds = Math.floor(Date.now() / 1000),
-  maxAgeSeconds =  fiveMinutes,
+  maxAgeSeconds = fiveMinutes,
 }: {
   rawBody: string;
   signatureHeader: string | null;
@@ -132,6 +134,29 @@ export function verifyHelcimWebhook({
       crypto.timingSafeEqual(actual, expectedBuffer)
     );
   });
+}
+
+export function verifyHelcimPayResponse({
+  rawData,
+  hash,
+  secretToken,
+}: {
+  rawData: Record<string, unknown>;
+  hash: string;
+  secretToken: string;
+}) {
+  const normalizedData = JSON.stringify(rawData);
+  const expectedHash = crypto
+    .createHash("sha256")
+    .update(`${normalizedData}${secretToken}`)
+    .digest("hex");
+  const actualBuffer = Buffer.from(hash);
+  const expectedBuffer = Buffer.from(expectedHash);
+
+  return (
+    actualBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(actualBuffer, expectedBuffer)
+  );
 }
 
 function requiredConfig() {

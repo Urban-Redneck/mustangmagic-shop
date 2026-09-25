@@ -6,7 +6,8 @@ alter table public.store_orders
   alter column stripe_checkout_session_id drop not null,
   alter column raw_stripe_session drop not null;
 
-drop constraint if exists store_orders_stripe_checkout_session_id_not_blank;
+alter table public.store_orders
+  drop constraint if exists store_orders_stripe_checkout_session_id_not_blank;
 alter table public.store_orders
   add constraint store_orders_stripe_checkout_session_id_not_blank
   check (

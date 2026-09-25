@@ -278,12 +278,21 @@ export default async function CartPage({ searchParams }: CartPageProps) {
                   availability are checked again on the server.
                 </p>
               ) : null}
-              <a
-                href="tel:+16312543430"
-                className="mt-5 flex w-full justify-center rounded bg-red-700 px-5 py-3 text-sm font-black uppercase tracking-wide text-white hover:bg-red-800"
-              >
-                Call to order: (631) 254-3430
-              </a>
+              {canCheckout ? (
+                <Link
+                  href="/checkout"
+                  className="mt-5 flex w-full justify-center rounded bg-red-700 px-5 py-3 text-sm font-black uppercase tracking-wide text-white hover:bg-red-800"
+                >
+                  Continue to checkout
+                </Link>
+              ) : (
+                <a
+                  href="tel:+16312543430"
+                  className="mt-5 flex w-full justify-center rounded bg-red-700 px-5 py-3 text-sm font-black uppercase tracking-wide text-white hover:bg-red-800"
+                >
+                  Call to order: (631) 254-3430
+                </a>
+              )}
               <form action="/api/cart" method="post" className="mt-3">
                 <input type="hidden" name="action" value="clear" />
                 <input type="hidden" name="returnTo" value="/cart" />
