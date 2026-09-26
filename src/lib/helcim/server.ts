@@ -170,9 +170,11 @@ async function findHelcimV2Preauthorization({
   }
 
   const root = objectValue(payload);
-  const records = arrayValue(root?.data).length > 0
-    ? arrayValue(root?.data)
-    : arrayValue(objectValue(root?.data)?.data);
+  const records = Array.isArray(payload)
+    ? payload
+    : arrayValue(root?.data).length > 0
+      ? arrayValue(root?.data)
+      : arrayValue(objectValue(root?.data)?.data);
   const legacyId = Number(legacyTransactionId);
   return records
     .map(objectValue)
