@@ -169,20 +169,24 @@ async function findHelcimV2Preauthorization({
     throw new Error(`Helcim transaction lookup failed: ${response.status} ${safeError(payload)}`);
   }
 
-  const records = arrayValue(objectValue(payload)?.data);
+  const root = objectValue(payload);
+  const records = arrayValue(root?.data).length > 0
+    ? arrayValue(root?.data)
+    : arrayValue(objectValue(root?.data)?.data);
   const legacyId = Number(legacyTransactionId);
   return records
     .map(objectValue)
     .filter((record): record is Record<string, unknown> => Boolean(record))
     .filter((record) => {
       const amount = Number(record.amount);
-      const type = stringValue(record.type)?.toUpperCase();
       const status = stringValue(record.status)?.toUpperCase();
+      const type = stringValue(record.type)?.toUpperCase() ?? "";
       return (
         Number.isFinite(amount) && Math.round(amount * 100) === amountCents &&
-        type === "PREAUTH" && status === "APPROVED" &&
+        (type === "PREAUTH" || type === "PREAUTHORIZATION" || type === "") &&
+        status === "APPROVED" &&
         stringValue(record.cardToken) === cardToken &&
-        Number(record.transactionId) !== legacyId
+        (Number(record.transactionId) !== legacyId || !Number.isFinite(legacyId))
       );
     })
     .sort((a, b) => String(b.dateCreated ?? "").localeCompare(String(a.dateCreated ?? "")))
