@@ -19,7 +19,12 @@ export async function POST(request: Request) {
   const intentId = stringValue(body?.intentId);
   const checkoutToken = stringValue(body?.checkoutToken);
   const secretToken = stringValue(body?.secretToken);
-  const response = objectValue(body?.response);
+  const eventMessage = parseObject(body?.response);
+  const nestedResponse = objectValue(eventMessage?.data);
+  const response =
+    nestedResponse && objectValue(nestedResponse.data) && stringValue(nestedResponse.hash)
+      ? nestedResponse
+      : eventMessage;
   const rawData = objectValue(response?.data);
   const hash = stringValue(response?.hash);
 
@@ -97,6 +102,18 @@ function objectValue(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function parseObject(value: unknown) {
+  if (typeof value !== "string") {
+    return objectValue(value);
+  }
+
+  try {
+    return objectValue(JSON.parse(value));
+  } catch {
+    return null;
+  }
 }
 
 function stringValue(value: unknown) {
