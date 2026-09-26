@@ -87,6 +87,108 @@ export async function initializeHelcimPaySession({
   return { checkoutToken, secretToken };
 }
 
+export async function captureHelcimPayPreauthorization({
+  legacyTransactionId,
+  cardToken,
+  amountCents,
+  dateCreated,
+  idempotencyKey,
+  ipAddress,
+}: {
+  legacyTransactionId: string;
+  cardToken: string;
+  amountCents: number;
+  dateCreated: string;
+  idempotencyKey: string;
+  ipAddress: string;
+}) {
+  const config = requiredConfig();
+  const transaction = await findHelcimV2Preauthorization({
+    legacyTransactionId,
+    cardToken,
+    amountCents,
+    dateCreated,
+  });
+  if (!transaction) {
+    throw new Error("Helcim V2 preauthorization transaction could not be located.");
+  }
+
+  const response = await fetch(`${config.apiBaseUrl}/payment/capture`, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "api-token": config.apiToken,
+      "idempotency-key": idempotencyKey,
+    },
+    body: JSON.stringify({
+      preAuthTransactionId: transaction.transactionId,
+      amount: amountCents / 100,
+      ipAddress,
+      ecommerce: true,
+    }),
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(`Helcim capture failed: ${response.status} ${safeError(payload)}`);
+  }
+
+  return {
+    v2TransactionId: String(transaction.transactionId),
+    response: objectValue(payload) ?? {},
+  };
+}
+
+async function findHelcimV2Preauthorization({
+  legacyTransactionId,
+  cardToken,
+  amountCents,
+  dateCreated,
+}: {
+  legacyTransactionId: string;
+  cardToken: string;
+  amountCents: number;
+  dateCreated: string;
+}) {
+  const config = requiredConfig();
+  const date = dateCreated.slice(0, 10);
+  const params = new URLSearchParams({
+    cardToken,
+    dateFrom: date,
+    dateTo: date,
+    limit: "100",
+    page: "1",
+  });
+  const response = await fetch(`${config.apiBaseUrl}/card-transactions?${params}`, {
+    headers: { accept: "application/json", "api-token": config.apiToken },
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(`Helcim transaction lookup failed: ${response.status} ${safeError(payload)}`);
+  }
+
+  const records = arrayValue(objectValue(payload)?.data);
+  const legacyId = Number(legacyTransactionId);
+  return records
+    .map(objectValue)
+    .filter((record): record is Record<string, unknown> => Boolean(record))
+    .filter((record) => {
+      const amount = Number(record.amount);
+      const type = stringValue(record.type)?.toUpperCase();
+      const status = stringValue(record.status)?.toUpperCase();
+      return (
+        Number.isFinite(amount) && Math.round(amount * 100) === amountCents &&
+        type === "PREAUTH" && status === "APPROVED" &&
+        stringValue(record.cardToken) === cardToken &&
+        Number(record.transactionId) !== legacyId
+      );
+    })
+    .sort((a, b) => String(b.dateCreated ?? "").localeCompare(String(a.dateCreated ?? "")))
+    .map((record) => ({ transactionId: Number(record.transactionId) }))[0] ?? null;
+}
+
 export function verifyHelcimWebhook({
   rawBody,
   signatureHeader,
@@ -169,6 +271,21 @@ function requiredConfig() {
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function objectValue(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function arrayValue(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeError(value: unknown) {
+  const record = objectValue(value);
+  return typeof record?.errors === "string" ? record.errors : "unknown error";
 }
 
 const fiveMinutes = 5 * 60;

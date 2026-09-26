@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
-import { verifyHelcimPayResponse } from "@/lib/helcim/server";
+import {
+  captureHelcimPayPreauthorization,
+  verifyHelcimPayResponse,
+} from "@/lib/helcim/server";
 import { submitAuthorizedCheckoutToTurn14 } from "@/lib/orders/turn14-fulfillment";
 
 export const dynamic = "force-dynamic";
@@ -86,6 +89,9 @@ export async function POST(request: Request) {
       helcim_payment_status: transactionStatus,
       helcim_card_brand: stringValue(rawData.cardType),
       helcim_card_last_four: lastFour(rawData.cardNumber),
+      helcim_card_token: stringValue(rawData.cardToken),
+      helcim_date_created: stringValue(rawData.dateCreated),
+      helcim_capture_status: "pending",
       helcim_authorized_at: new Date().toISOString(),
     })
     .eq("id", intentId)
@@ -111,6 +117,45 @@ export async function POST(request: Request) {
       .eq("status", "helcim_authorized");
     return NextResponse.json(
       { error: "Payment authorized, but the order needs fulfillment review." },
+      { status: 502 },
+    );
+  }
+
+  try {
+    const capture = await captureHelcimPayPreauthorization({
+      legacyTransactionId: transactionId,
+      cardToken: stringValue(rawData.cardToken) ?? "",
+      amountCents: intent.amount_total,
+      dateCreated: stringValue(rawData.dateCreated) ?? "",
+      idempotencyKey: intentId,
+      ipAddress: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "0.0.0.0",
+    });
+    const { error: captureUpdateError } = await supabase
+      .from("checkout_intents")
+      .update({
+        helcim_v2_transaction_id: capture.v2TransactionId,
+        helcim_capture_status: "captured",
+        helcim_captured_at: new Date().toISOString(),
+        helcim_settlement_payload: capture.response,
+      })
+      .eq("id", intentId)
+      .eq("status", "turn14_order_submitted");
+    if (captureUpdateError) {
+      throw new Error(`Helcim capture record update failed: ${captureUpdateError.message}`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Helcim capture failed.";
+    console.error("Helcim capture failed after Turn14 submission", message);
+    await supabase
+      .from("checkout_intents")
+      .update({
+        helcim_capture_status: "failed",
+        helcim_settlement_payload: { error: message },
+      })
+      .eq("id", intentId)
+      .eq("status", "turn14_order_submitted");
+    return NextResponse.json(
+      { error: "Order submitted, but payment capture needs fulfillment review." },
       { status: 502 },
     );
   }
