@@ -27,7 +27,13 @@ export function HelcimPayButton({
       }
 
       if (event.data.eventStatus === "ABORTED") {
+        removeHelcimPayIframe();
         setMessage("The payment was declined or cancelled. No order was placed.");
+        return;
+      }
+
+      if (event.data.eventStatus === "HIDE") {
+        removeHelcimPayIframe();
         return;
       }
 
@@ -62,6 +68,7 @@ export function HelcimPayButton({
               ? error.message
               : "Payment confirmation failed. Contact the shop before retrying.",
           );
+          removeHelcimPayIframe();
         });
     };
 
