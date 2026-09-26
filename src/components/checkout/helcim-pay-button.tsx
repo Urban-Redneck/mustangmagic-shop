@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 declare global {
@@ -19,6 +20,7 @@ export function HelcimPayButton({
   secretToken,
 }: HelcimPayButtonProps) {
   const [message, setMessage] = useState<string | null>(null);
+  const [completed, setCompleted] = useState(false);
 
   useEffect(() => {
     const listener = (event: MessageEvent) => {
@@ -60,6 +62,7 @@ export function HelcimPayButton({
           setMessage(
             "Payment authorized. Your order is being sent for fulfillment review.",
           );
+          setCompleted(true);
           removeHelcimPayIframe();
         })
         .catch((error: unknown) => {
@@ -75,6 +78,37 @@ export function HelcimPayButton({
     window.addEventListener("message", listener);
     return () => window.removeEventListener("message", listener);
   }, [checkoutToken, intentId, secretToken]);
+
+  if (completed) {
+    return (
+      <div className="rounded border border-green-200 bg-green-50 p-6">
+        <p className="text-sm font-black uppercase tracking-[0.18em] text-green-700">
+          Thank you for your business
+        </p>
+        <h2 className="mt-2 text-2xl font-black text-zinc-950">
+          Payment authorized
+        </h2>
+        <p className="mt-3 text-sm leading-6 text-zinc-700">
+          Your payment was authorized successfully. Your order is being sent
+          for fulfillment review.
+        </p>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <Link
+            href="/parts"
+            className="rounded bg-red-700 px-4 py-3 text-sm font-black uppercase tracking-wide text-white hover:bg-red-800"
+          >
+            Continue shopping
+          </Link>
+          <Link
+            href="/"
+            className="rounded border border-zinc-300 px-4 py-3 text-sm font-black uppercase tracking-wide text-zinc-700 hover:border-zinc-950 hover:text-zinc-950"
+          >
+            Return home
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-3">
