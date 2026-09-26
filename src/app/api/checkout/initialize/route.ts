@@ -192,10 +192,18 @@ export async function POST(request: Request) {
       paymentType: "preauth",
     });
 
-    await supabase
+    const { error: sessionStatusError } = await supabase
       .from("checkout_intents")
       .update({ status: "helcim_session_created" })
       .eq("id", intent.id);
+
+    if (sessionStatusError) {
+      console.error(
+        "Checkout intent session status update failed",
+        sessionStatusError.message,
+      );
+      return errorResponse("Checkout is temporarily unavailable.", 503);
+    }
 
     return NextResponse.json({
       intentId: intent.id,
