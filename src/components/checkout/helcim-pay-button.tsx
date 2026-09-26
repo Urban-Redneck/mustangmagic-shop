@@ -86,11 +86,11 @@ export function HelcimPayButton({
           Thank you for your business
         </p>
         <h2 className="mt-2 text-2xl font-black text-zinc-950">
-          Payment authorized
+          Payment complete
         </h2>
         <p className="mt-3 text-sm leading-6 text-zinc-700">
-          Your payment was authorized successfully. Your order is being sent
-          for fulfillment review.
+          Your payment was captured successfully, and your order was submitted
+          to Turn14 for fulfillment.
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
           <Link
