@@ -88,14 +88,12 @@ export async function initializeHelcimPaySession({
 }
 
 export async function captureHelcimPayPreauthorization({
-  legacyTransactionId,
   cardToken,
   amountCents,
   dateCreated,
   idempotencyKey,
   ipAddress,
 }: {
-  legacyTransactionId: string;
   cardToken: string;
   amountCents: number;
   dateCreated: string;
@@ -104,7 +102,6 @@ export async function captureHelcimPayPreauthorization({
 }) {
   const config = requiredConfig();
   const transaction = await findHelcimV2Preauthorization({
-    legacyTransactionId,
     cardToken,
     amountCents,
     dateCreated,
@@ -141,12 +138,10 @@ export async function captureHelcimPayPreauthorization({
 }
 
 async function findHelcimV2Preauthorization({
-  legacyTransactionId,
   cardToken,
   amountCents,
   dateCreated,
 }: {
-  legacyTransactionId: string;
   cardToken: string;
   amountCents: number;
   dateCreated: string;
@@ -175,7 +170,6 @@ async function findHelcimV2Preauthorization({
     : arrayValue(root?.data).length > 0
       ? arrayValue(root?.data)
       : arrayValue(objectValue(root?.data)?.data);
-  const legacyId = Number(legacyTransactionId);
   return records
     .map(objectValue)
     .filter((record): record is Record<string, unknown> => Boolean(record))
@@ -187,8 +181,7 @@ async function findHelcimV2Preauthorization({
         Number.isFinite(amount) && Math.round(amount * 100) === amountCents &&
         (type === "PREAUTH" || type === "PREAUTHORIZATION" || type === "") &&
         status === "APPROVED" &&
-        stringValue(record.cardToken) === cardToken &&
-        (Number(record.transactionId) !== legacyId || !Number.isFinite(legacyId))
+        stringValue(record.cardToken) === cardToken
       );
     })
     .sort((a, b) => String(b.dateCreated ?? "").localeCompare(String(a.dateCreated ?? "")))

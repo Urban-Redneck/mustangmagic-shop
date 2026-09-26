@@ -123,7 +123,6 @@ export async function POST(request: Request) {
 
   try {
     const capture = await captureHelcimPayPreauthorization({
-      legacyTransactionId: transactionId,
       cardToken: stringValue(rawData.cardToken) ?? "",
       amountCents: intent.amount_total,
       dateCreated: stringValue(rawData.dateCreated) ?? "",
