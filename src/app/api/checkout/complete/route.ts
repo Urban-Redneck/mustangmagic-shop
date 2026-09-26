@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { verifyHelcimPayResponse } from "@/lib/helcim/server";
+import { submitAuthorizedCheckoutToTurn14 } from "@/lib/orders/turn14-fulfillment";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,25 @@ export async function POST(request: Request) {
   if (updateError) {
     console.error("Helcim payment confirmation update failed", updateError.message);
     return NextResponse.json({ error: "Payment confirmation could not be recorded." }, { status: 503 });
+  }
+
+  try {
+    await submitAuthorizedCheckoutToTurn14(supabase, intentId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Turn14 order submission failed.";
+    console.error("Turn14 order submission failed", message);
+    await supabase
+      .from("checkout_intents")
+      .update({
+        status: "turn14_order_failed",
+        turn14_order_error: message,
+      })
+      .eq("id", intentId)
+      .eq("status", "helcim_authorized");
+    return NextResponse.json(
+      { error: "Payment authorized, but the order needs fulfillment review." },
+      { status: 502 },
+    );
   }
 
   return NextResponse.json({ ok: true });
