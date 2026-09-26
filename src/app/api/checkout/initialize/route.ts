@@ -207,6 +207,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       intentId: intent.id,
+      subtotalCents,
+      shippingCents,
+      feeCents,
       amountCents: totalCents,
       currency: "USD",
       checkoutToken: session.checkoutToken,

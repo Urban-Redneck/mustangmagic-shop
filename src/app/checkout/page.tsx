@@ -7,6 +7,9 @@ import { HelcimPayButton } from "@/components/checkout/helcim-pay-button";
 
 type CheckoutSession = {
   intentId: string;
+  subtotalCents: number;
+  shippingCents: number;
+  feeCents: number;
   amountCents: number;
   currency: string;
   checkoutToken: string;
@@ -86,9 +89,34 @@ export default function CheckoutPage() {
               </button>
             ) : (
               <div className="grid gap-4 border-t border-zinc-200 pt-6">
-                <p className="text-sm font-bold text-zinc-700">
-                  Turn14 confirmed the cart. Final checkout total: {formatMoney(session.amountCents, session.currency)}
-                </p>
+                <div className="rounded border border-zinc-200 bg-zinc-50 p-4">
+                  <p className="text-sm font-black uppercase tracking-[0.14em] text-zinc-950">
+                    Order summary
+                  </p>
+                  <dl className="mt-4 grid gap-2 text-sm text-zinc-700">
+                    <div className="flex justify-between gap-4">
+                      <dt>Parts subtotal</dt>
+                      <dd className="font-semibold">{formatMoney(session.subtotalCents, session.currency)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt>Shipping</dt>
+                      <dd className="font-semibold">{formatMoney(session.shippingCents, session.currency)}</dd>
+                    </div>
+                    {session.feeCents > 0 ? (
+                      <div className="flex justify-between gap-4">
+                        <dt>Fees</dt>
+                        <dd className="font-semibold">{formatMoney(session.feeCents, session.currency)}</dd>
+                      </div>
+                    ) : null}
+                    <div className="mt-2 flex justify-between gap-4 border-t border-zinc-300 pt-3 text-base font-black text-zinc-950">
+                      <dt>Total</dt>
+                      <dd>{formatMoney(session.amountCents, session.currency)}</dd>
+                    </div>
+                  </dl>
+                  <p className="mt-3 text-xs font-semibold text-zinc-500">
+                    Turn14 confirmed product availability and shipping for this total.
+                  </p>
+                </div>
                 <HelcimPayButton
                   intentId={session.intentId}
                   checkoutToken={session.checkoutToken}
