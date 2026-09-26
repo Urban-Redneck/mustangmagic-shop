@@ -190,7 +190,6 @@ export async function POST(request: Request) {
     const session = await initializeHelcimPaySession({
       amountCents: totalCents,
       paymentType: "preauth",
-      invoiceNumber: `MM-${intent.id.slice(0, 8).toUpperCase()}`,
     });
 
     await supabase
