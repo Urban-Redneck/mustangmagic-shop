@@ -20,12 +20,14 @@ export default function CheckoutPage() {
   const [session, setSession] = useState<CheckoutSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [completed, setCompleted] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setError(null);
     setSession(null);
+    setCompleted(false);
 
     const form = new FormData(event.currentTarget);
     const response = await fetch("/api/checkout/initialize", {
@@ -61,6 +63,34 @@ export default function CheckoutPage() {
             We will recheck product availability and shipping with Turn14 before opening the secure payment form.
           </p>
 
+          {completed ? (
+            <div className="mt-10 rounded border border-green-200 bg-green-50 p-6 sm:p-8">
+              <p className="text-sm font-black uppercase tracking-[0.18em] text-green-700">
+                Thank you for your business
+              </p>
+              <h2 className="mt-2 text-2xl font-black text-zinc-950">
+                Payment complete
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-zinc-700">
+                Your payment was captured successfully, and your order was
+                submitted to Turn14 for fulfillment.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link
+                  href="/parts"
+                  className="rounded bg-red-700 px-4 py-3 text-sm font-black uppercase tracking-wide text-white hover:bg-red-800"
+                >
+                  Continue shopping
+                </Link>
+                <Link
+                  href="/"
+                  className="rounded border border-zinc-300 px-4 py-3 text-sm font-black uppercase tracking-wide text-zinc-700 hover:border-zinc-950 hover:text-zinc-950"
+                >
+                  Return home
+                </Link>
+              </div>
+            </div>
+          ) : (
           <form onSubmit={submit} className="mt-10 grid gap-6 border border-zinc-200 bg-white p-6 sm:p-8">
             <section className="grid gap-4">
               <h2 className="text-lg font-black text-zinc-950">Contact</h2>
@@ -121,10 +151,12 @@ export default function CheckoutPage() {
                   intentId={session.intentId}
                   checkoutToken={session.checkoutToken}
                   secretToken={session.secretToken}
+                  onCompleted={() => setCompleted(true)}
                 />
               </div>
             )}
           </form>
+          )}
         </div>
       </main>
     </>

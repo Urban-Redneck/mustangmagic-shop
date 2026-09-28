@@ -12,12 +12,14 @@ type HelcimPayButtonProps = {
   intentId: string;
   checkoutToken: string;
   secretToken: string;
+  onCompleted: () => void;
 };
 
 export function HelcimPayButton({
   intentId,
   checkoutToken,
   secretToken,
+  onCompleted,
 }: HelcimPayButtonProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
@@ -62,6 +64,7 @@ export function HelcimPayButton({
           setMessage(
             "Payment authorized. Your order is being sent for fulfillment review.",
           );
+          onCompleted();
           setCompleted(true);
           removeHelcimPayIframe();
         })
@@ -77,7 +80,7 @@ export function HelcimPayButton({
 
     window.addEventListener("message", listener);
     return () => window.removeEventListener("message", listener);
-  }, [checkoutToken, intentId, secretToken]);
+  }, [checkoutToken, intentId, onCompleted, secretToken]);
 
   if (completed) {
     return (
