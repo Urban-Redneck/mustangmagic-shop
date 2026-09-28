@@ -50,18 +50,22 @@ export default function CheckoutPage() {
       <Script src="https://secure.helcim.app/helcim-pay/services/start.js" />
       <main className="bg-zinc-50">
         <div className="mx-auto max-w-3xl px-5 py-12 lg:px-8">
-          <Link href="/cart" className="text-sm font-black uppercase tracking-wide text-red-700">
-            Back to cart
-          </Link>
-          <p className="mt-10 text-sm font-black uppercase tracking-[0.18em] text-red-700">
-            Secure checkout
-          </p>
-          <h1 className="mt-3 text-4xl font-black tracking-tight text-zinc-950">
-            Confirm your shipping details
-          </h1>
-          <p className="mt-4 max-w-2xl leading-7 text-zinc-600">
-            We will recheck product availability and shipping before opening the secure payment form.
-          </p>
+          {!completed ? (
+            <>
+              <Link href="/cart" className="text-sm font-black uppercase tracking-wide text-red-700">
+                Back to cart
+              </Link>
+              <p className="mt-10 text-sm font-black uppercase tracking-[0.18em] text-red-700">
+                Secure checkout
+              </p>
+              <h1 className="mt-3 text-4xl font-black tracking-tight text-zinc-950">
+                Confirm your shipping details
+              </h1>
+              <p className="mt-4 max-w-2xl leading-7 text-zinc-600">
+                We will recheck product availability and shipping before opening the secure payment form.
+              </p>
+            </>
+          ) : null}
 
           {completed ? (
             <div className="mt-10 rounded border border-green-200 bg-green-50 p-6 sm:p-8">
