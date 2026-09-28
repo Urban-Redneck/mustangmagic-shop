@@ -344,6 +344,7 @@ def normalize_images(product: dict[str, Any], files: Any) -> list[dict[str, Any]
                 "alt_text": f"{product['name']} - {media_content}",
                 "sort_order": len(rows),
                 "is_primary": False,
+                "source": "turn14",
                 "width": int(float(best_link["width"])) if best_link.get("width") else None,
                 "height": int(float(best_link["height"])) if best_link.get("height") else None,
             }
@@ -384,6 +385,7 @@ def normalize_primary_thumbnail_replacement(
         "alt_text": f"{product['name']} - Product image",
         "sort_order": 0,
         "is_primary": True,
+        "source": "turn14",
         "width": 800,
         "height": 800,
     }
@@ -474,6 +476,22 @@ def write_item_data(config: dict[str, Any], product: dict[str, Any], normalized:
         for key, value in normalized["product_update"].items()
         if value is not None
     }
+    custom_query = urllib.parse.urlencode(
+        {
+            "select": "id",
+            "product_id": f"eq.{product['id']}",
+            "source": "eq.custom",
+            "is_primary": "eq.true",
+            "limit": "1",
+        }
+    )
+    custom_primary = request_json(
+        config,
+        supabase_request(config, "GET", f"product_images?{custom_query}"),
+    )
+    has_custom_primary = isinstance(custom_primary, list) and bool(custom_primary)
+    if has_custom_primary:
+        product_update.pop("primary_image_url", None)
     if product_update:
         request_json(
             config,
@@ -489,16 +507,22 @@ def write_item_data(config: dict[str, Any], product: dict[str, Any], normalized:
     images = normalized["images"]
     if not images:
         return
-    request_json(
-        config,
-        supabase_request(
+    if has_custom_primary:
+        # Keep a manually curated image primary and import Turn14 images as alternates.
+        images = [{**image, "is_primary": False} for image in images]
+    else:
+        # Clear any existing primary before upserting the Turn14 primary. This avoids
+        # the one-primary-per-product constraint when an older source owns the row.
+        request_json(
             config,
-            "PATCH",
-            f"product_images?product_id=eq.{urllib.parse.quote(product['id'])}",
-            {"is_primary": False},
-            prefer="return=minimal",
-        ),
-    )
+            supabase_request(
+                config,
+                "PATCH",
+                f"product_images?product_id=eq.{urllib.parse.quote(product['id'])}&is_primary=eq.true",
+                {"is_primary": False},
+                prefer="return=minimal",
+            ),
+        )
     request_json(
         config,
         supabase_request(

@@ -15,6 +15,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "bmrsuspension.com",
       },
+      {
+        protocol: "https",
+        hostname: "nxojltmmofultvnwigev.supabase.co",
+      },
     ],
   },
 };
