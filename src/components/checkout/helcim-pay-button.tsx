@@ -93,7 +93,7 @@ export function HelcimPayButton({
         </h2>
         <p className="mt-3 text-sm leading-6 text-zinc-700">
           Your payment was captured successfully, and your order was submitted
-          to Turn14 for fulfillment.
+          for fulfillment.
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
           <Link

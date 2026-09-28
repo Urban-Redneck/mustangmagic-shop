@@ -60,7 +60,7 @@ export default function CheckoutPage() {
             Confirm your shipping details
           </h1>
           <p className="mt-4 max-w-2xl leading-7 text-zinc-600">
-            We will recheck product availability and shipping with Turn14 before opening the secure payment form.
+            We will recheck product availability and shipping before opening the secure payment form.
           </p>
 
           {completed ? (
@@ -73,7 +73,7 @@ export default function CheckoutPage() {
               </h2>
               <p className="mt-3 text-sm leading-6 text-zinc-700">
                 Your payment was captured successfully, and your order was
-                submitted to Turn14 for fulfillment.
+                submitted for fulfillment.
               </p>
               <div className="mt-5 flex flex-wrap gap-3">
                 <Link
@@ -144,7 +144,7 @@ export default function CheckoutPage() {
                     </div>
                   </dl>
                   <p className="mt-3 text-xs font-semibold text-zinc-500">
-                    Turn14 confirmed product availability and shipping for this total.
+                    Product availability and shipping were confirmed for this total.
                   </p>
                 </div>
                 <HelcimPayButton
